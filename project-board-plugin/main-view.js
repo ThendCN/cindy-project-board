@@ -139,17 +139,34 @@ function inline(s) {
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
 }
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_SEP = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+
 function markdown(src) {
   const out = [];
   let list = null;
   let code = null;
   const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  for (const line of src.split(/\r?\n/)) {
+  const lines = src.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (code !== null) {
       if (/^```/.test(line)) { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null; } else code.push(line);
       continue;
     }
     if (/^```/.test(line)) { closeList(); code = []; continue; }
+    // 表格：表头行后紧跟分隔行（|---|---|）才算表格
+    if (TABLE_ROW.test(line) && TABLE_SEP.test(lines[i + 1] ?? '')) {
+      closeList();
+      const head = cells(line).map((c) => `<th>${inline(c)}</th>`).join('');
+      const body = [];
+      for (i += 2; i < lines.length && TABLE_ROW.test(lines[i]); i++)
+        body.push(`<tr>${cells(lines[i]).map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`);
+      i--;
+      out.push(`<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body.join('')}</tbody></table></div>`);
+      continue;
+    }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
     const ul = /^\s*[-*+]\s+(.*)$/.exec(line);
     const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
@@ -211,6 +228,8 @@ function startIntroEdit() {
   $('intro-body').replaceChildren(box);
   $('intro-edit').disabled = true;
   area.focus();
+  area.setSelectionRange(0, 0);
+  area.scrollTop = 0;
 }
 
 async function saveIntro(content, button) {
@@ -331,7 +350,7 @@ function renderTodos() {
       }
       const text = document.createElement('span');
       text.className = 'text';
-      text.textContent = t.text;
+      text.innerHTML = inline(t.text);
       label.append(box, text);
       const acts = document.createElement('span');
       acts.className = 'acts';
