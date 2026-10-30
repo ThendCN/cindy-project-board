@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.121",
+  "id": "project-board",
+  "name": "Project Board",
+  "description": "See each project's tasks by status, introduction, to-dos, AGENTS.md and other docs plus Git status in one page. Docs live in the project's .cindy folder, are committed with git, and can be edited directly or generated and updated by AI.",
+  "whenToUse": "When the user wants an overview of a project: its tasks and their status, introduction, to-do list, AGENTS.md / CLAUDE.md, project knowledge, or Git status.",
+  "version": "0.3.1",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json"
+  },
+  "mainView": {
+    "title": "Project Board",
+    "icon": "folder",
+    "html": "main-view.html"
+  },
+  "agent": {
+    "tasks": true,
+    "targets": true,
+    "observe": true
+  },
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 120
+  }
+}

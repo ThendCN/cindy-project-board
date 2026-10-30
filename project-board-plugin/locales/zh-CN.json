@@ -1,0 +1,8 @@
+{
+  "name": "项目看板",
+  "description": "在一个页面里按状态查看每个项目的任务，以及项目介绍、待办、AGENTS.md 等资料和 Git 状态。资料存在项目的 .cindy 目录里，随 git 提交，可以直接编辑，也可以让 AI 生成和更新。",
+  "whenToUse": "用户想总览某个项目时：任务和状态、项目介绍、待办清单、AGENTS.md / CLAUDE.md、项目知识库或 Git 状态。",
+  "mainView": {
+    "title": "项目看板"
+  }
+}

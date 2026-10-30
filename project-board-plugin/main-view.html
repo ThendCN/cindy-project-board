@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="main-view.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title-row">
+      <select id="project" aria-label="Project"></select>
+      <button id="refresh" class="ghost" type="button"></button>
+    </div>
+    <div id="path" class="meta"></div>
+  </header>
+  <div id="notice" class="notice" hidden></div>
+  <main id="board" class="board" hidden>
+    <section class="card tasks">
+      <div class="card-head"><h2><span data-t="tasks"></span> <span id="task-count" class="count"></span></h2></div>
+      <div id="task-body"></div>
+    </section>
+    <section class="card intro">
+      <div class="card-head"><h2 data-t="intro"></h2><span class="head-acts"><button id="intro-edit" class="ghost" type="button" data-t="edit"></button><button class="ai" type="button" data-ai="intro"></button></span></div>
+      <div id="intro-body" class="md"></div>
+    </section>
+    <section class="card todos">
+      <div class="card-head"><h2><span data-t="todos"></span> <span id="todo-count" class="count"></span></h2><span class="head-acts"><button id="todo-select" class="ghost" type="button"></button><button class="ai" type="button" data-ai="todos"></button></span></div>
+      <form id="todo-add" class="todo-add"><input id="todo-new" maxlength="500"><button data-t="add"></button></form>
+      <div id="todo-body"></div>
+      <div id="todo-select-bar" class="select-bar" hidden><button id="todo-select-task" class="ai" type="button"></button></div>
+    </section>
+    <section class="card files">
+      <div class="card-head"><h2 data-t="files"></h2></div>
+      <ul id="file-list" class="file-list"></ul>
+    </section>
+    <section class="card git">
+      <div class="card-head"><h2>Git</h2></div>
+      <div id="git-body"></div>
+    </section>
+  </main>
+
+  <dialog id="ask">
+    <form method="dialog" class="dialog">
+      <h3 id="ask-title"></h3>
+      <p class="meta" data-t="askHint"></p>
+      <textarea id="ask-text" rows="9"></textarea>
+      <div class="actions">
+        <button value="cancel" class="ghost" data-t="cancel"></button>
+        <button id="ask-send" value="send" class="primary" data-t="send"></button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="viewer">
+    <form method="dialog" class="dialog wide">
+      <h3 id="viewer-title"></h3>
+      <div id="viewer-body" class="md scroll"></div>
+      <div class="actions"><button value="close" class="ghost" data-t="close"></button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" hidden></div>
+  <script src="main-view.js"></script>
+</body>
+</html>
