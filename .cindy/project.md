@@ -39,6 +39,8 @@ project-board-plugin/
 ├── node/worker.cjs     # Node 工作进程：读资料、Git 状态与总览摘要，原子写入 .cindy/*.md、AGENTS.md、CLAUDE.md
 ├── locales/            # 插件名称、描述的多语言（en、zh-CN、ja、ko）
 └── assets/icon.png     # 插件图标
+tests/
+└── worker.test.cjs     # Node 工作进程测试（node --test）
 ```
 
 数据流：主视图 ⇄（BroadcastChannel，按 reqId 去重重发）⇄ `main.js` → 宿主 API 或 `node/worker.cjs`。项目目录只接受 Cindy 已登记的项目，写操作在 Node 进程里串行执行。
@@ -47,11 +49,17 @@ project-board-plugin/
 
 - **运行**：在 Cindy 里用插件开发工具（`ghost_forge_pack` / `ghost_forge_install`）打包并安装 `project-board-plugin/`，然后在 Cindy 中打开「项目看板」主视图。打包产物 `*.cindy` 已被 git 忽略。
 - **权限**：首次使用需在 Cindy 的插件详情页允许查看任务、新建任务。
-- **测试**：目前没有自动化测试。可做语法检查：
+- **测试**：`tests/worker.test.cjs` 像 Cindy 一样启动 Node 工作进程、经 stdio 发 JSON-RPC 请求，在临时目录里检查待办勾选、改写、新增、删除、项目介绍保存、资料入口写入和总览摘要（含 AI 同时改文件、CRLF 换行、并发写入、软链接等情况）。只用 Node 内置模块，无需安装依赖：
+
+  ```sh
+  node --test tests/worker.test.cjs
+  ```
+
+  主视图另做语法检查：
 
   ```sh
   cd project-board-plugin
-  node --check main.js && node --check main-view.js && node --check node/worker.cjs
+  node --check main.js && node --check main-view.js && node --check main-view-i18n.js
   ```
 
-  功能验证靠在 Cindy 里手动操作：切换项目、勾选/新增待办、编辑介绍、加入资料入口、让 AI 生成资料。
+  界面功能（总览、任务状态、刷新、多语言）靠在 Cindy 里手动验证。
