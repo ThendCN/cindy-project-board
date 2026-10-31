@@ -42,6 +42,7 @@ const OPS = {
   updateTodo: (args) => node('project/update-todo', args),
   addTodo: (args) => node('project/add-todo', args),
   writeIntro: (args) => node('project/write-intro', args),
+  addEntry: (args) => node('project/add-entry', args),
   tasks,
   openTask: ({ taskId }) => cindy.observe.openTask({ taskId }),
   askAi,

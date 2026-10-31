@@ -31,7 +31,7 @@ select { font: inherit; color: inherit; background: var(--card); border: 1px sol
 .card-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .count { color: var(--muted); font-weight: 400; }
 .empty { color: var(--muted); font-size: 12px; margin: 0; }
-.intro, .todos { display: flex; flex-direction: column; height: min(62vh, 640px); }
+.intro, .todos { display: flex; flex-direction: column; max-height: min(62vh, 640px); }
 .intro .md, #todo-body { flex: 1; min-height: 0; overflow: auto; }
 .intro .card-head, .todos .card-head, .todo-add, .select-bar { flex: none; }
 .md h1 { font-size: 17px; margin: 4px 0 8px; } .md h2 { font-size: 15px; margin: 12px 0 6px; } .md h3, .md h4 { font-size: 13px; margin: 10px 0 4px; }

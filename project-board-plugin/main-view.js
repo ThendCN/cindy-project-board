@@ -32,6 +32,9 @@ const STRINGS = {
     introChanged: '项目介绍刚在别处被修改过。你的内容还在编辑框里；再点一次保存会覆盖成你的版本，点取消可查看最新内容。',
     introSaved: '项目介绍已保存到 .cindy/project.md。',
     todoTaskHeading: '从待办新建任务',
+    addEntry: '加入资料入口', entryReady: '已含资料入口', joiner: '；', period: '。',
+    entryDone: { created: '新建了 AGENTS.md，写入项目资料入口', added: '已在 AGENTS.md 末尾加入项目资料入口', exists: 'AGENTS.md 已有项目资料入口' },
+    claudeDone: { created: '新建了 CLAUDE.md 并导入 AGENTS.md', added: '在 CLAUDE.md 末尾导入了 AGENTS.md', exists: '' },
     select: '选择', selectedTask: '用选中的 {n} 条新建任务', manyTitle: '{t} 等 {n} 项',
     todosPrompt: '请完成这个项目里的以下待办：\n{list}\n\n这些待办来自 .cindy/todos.md，每完成一条就把它改成「- [x]」。',
     todoPrompt: '请完成这个项目里的一条待办：{t}\n\n这条待办来自 .cindy/todos.md，完成后请把它改成「- [x]」。',
@@ -74,6 +77,9 @@ const STRINGS = {
     introChanged: 'The introduction was just changed elsewhere. Your text is still in the editor; save again to overwrite it with your version, or cancel to see the latest.',
     introSaved: 'Saved the introduction to .cindy/project.md.',
     todoTaskHeading: 'New session from to-do',
+    addEntry: 'Add notes entry', entryReady: 'Notes entry included', joiner: '; ', period: '.',
+    entryDone: { created: 'Created AGENTS.md with the project notes entry', added: 'Added the project notes entry to the end of AGENTS.md', exists: 'AGENTS.md already has the project notes entry' },
+    claudeDone: { created: 'created CLAUDE.md importing AGENTS.md', added: 'added an AGENTS.md import to the end of CLAUDE.md', exists: '' },
     select: 'Select', selectedTask: 'New session with {n} selected', manyTitle: '{t} and {n} more',
     todosPrompt: 'Please complete these to-dos in the project:\n{list}\n\nThese items come from .cindy/todos.md. Change each one to "- [x]" when it is done.',
     todoPrompt: 'Please complete this to-do in the project: {t}\n\nThis item comes from .cindy/todos.md. When it is done, change it to "- [x]".',
@@ -91,6 +97,7 @@ const FILES = ['readme', 'agents', 'claude', 'knowledge'];
 const AI_FILES = new Set(['agents', 'claude', 'knowledge']);
 
 let S = STRINGS.en;
+let lang = 'en';
 let projects = [];
 let current = null; // { id, label }
 let snap = null;
@@ -397,7 +404,9 @@ function renderFiles() {
   for (const id of FILES) {
     const doc = snap.docs[id];
     const li = document.createElement('li');
-    li.innerHTML = `<div class="name">${esc(S[id])}<small>${esc(snap.paths[id])} · ${esc(doc ? S.ready : S.missing)}</small></div>`;
+    // AGENTS.md 已写有项目介绍与待办的路径，就算已加入资料入口
+    const entryReady = id === 'agents' && doc && doc.content.includes(snap.paths.intro) && doc.content.includes(snap.paths.todos);
+    li.innerHTML = `<div class="name">${esc(S[id])}<small>${esc(snap.paths[id])} · ${esc(doc ? S.ready : S.missing)}${entryReady ? ` · ${esc(S.entryReady)}` : ''}</small></div>`;
     if (doc) {
       const view = document.createElement('button');
       view.type = 'button';
@@ -405,6 +414,13 @@ function renderFiles() {
       view.textContent = S.view;
       view.addEventListener('click', () => openViewer(id));
       li.append(view);
+    }
+    if (id === 'agents' && !entryReady) {
+      const entry = document.createElement('button');
+      entry.type = 'button';
+      entry.textContent = S.addEntry;
+      entry.addEventListener('click', () => addEntry(entry));
+      li.append(entry);
     }
     if (AI_FILES.has(id)) {
       const ai = document.createElement('button');
@@ -415,6 +431,18 @@ function renderFiles() {
       li.append(ai);
     }
     ul.append(li);
+  }
+}
+
+async function addEntry(button) {
+  button.disabled = true;
+  try {
+    const res = await call('addEntry', { dir: current.id, lang });
+    toast([S.entryDone[res.agents], S.claudeDone[res.claude]].filter(Boolean).join(S.joiner) + S.period);
+    await load();
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+    button.disabled = false;
   }
 }
 
@@ -621,7 +649,8 @@ function recalled() {
 
 async function init() {
   const ctx = await (await fetch('/app-context')).json();
-  S = STRINGS[ctx.context?.locale] || STRINGS.en;
+  lang = STRINGS[ctx.context?.locale] ? ctx.context.locale : 'en';
+  S = STRINGS[lang];
   document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = S[el.dataset.t]; });
   $('refresh').textContent = S.refresh;
   document.querySelector('[data-ai="todos"]').textContent = S.organize;

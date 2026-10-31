@@ -189,6 +189,46 @@ async function writeIntro({ dir, content, expected }) {
   return { ok: true };
 }
 
+// AGENTS.md 里的「项目资料」入口：Codex 读 AGENTS.md，Claude Code 读 CLAUDE.md（经 @AGENTS.md 导入）。
+const ENTRY = {
+  'zh-CN': ['## 项目资料', '', `- 项目介绍：\`${DOCS.intro}\``, `- 待办清单：\`${DOCS.todos}\`（完成一条就把该行的 \`- [ ]\` 改成 \`- [x]\`）`],
+  en: ['## Project Notes', '', `- Project introduction: \`${DOCS.intro}\``, `- To-do list: \`${DOCS.todos}\` (change an item's \`- [ ]\` to \`- [x]\` when it is done)`],
+};
+const hasEntry = (content) => content.includes(DOCS.intro) && content.includes(DOCS.todos);
+const importsAgents = (content) => /^\s*@AGENTS\.md\s*$/m.test(content);
+
+// 在文件末尾追加几行，沿用文件原有的换行符，并与前文空一行。
+function appendLines(content, lines) {
+  const eol = /\r\n/.test(content) ? '\r\n' : '\n';
+  const body = lines.join(eol) + eol;
+  if (content === '') return body;
+  const prefix = content.endsWith('\n') ? content : content + eol;
+  return prefix + eol + body;
+}
+
+// CLAUDE.md / AGENTS.md 常是互相指向的软链接：写到链接指向的真实文件，不把链接替换成普通文件。
+const realFile = (file) => fs.realpath(file).catch(() => file);
+
+/** 在 AGENTS.md 加入项目资料入口，并确保 CLAUDE.md 导入 AGENTS.md；已有的不重复加。 */
+async function addEntry({ dir, lang }) {
+  const agentsFile = await realFile(path.join(dir, DOCS.agents));
+  const agents = await readOrEmpty(agentsFile);
+  let agentsResult = 'exists';
+  if (!hasEntry(agents)) {
+    await writeAtomic(agentsFile, appendLines(agents, ENTRY[lang] ?? ENTRY.en));
+    agentsResult = agents === '' ? 'created' : 'added';
+  }
+  // 先写 AGENTS.md 再读 CLAUDE.md：两者是同一个文件（软链接）时，这里已能读到入口，不会重复写。
+  const claudeFile = await realFile(path.join(dir, DOCS.claude));
+  const claude = await readOrEmpty(claudeFile);
+  let claudeResult = 'exists';
+  if (!importsAgents(claude) && !hasEntry(claude)) {
+    await writeAtomic(claudeFile, appendLines(claude, ['@AGENTS.md']));
+    claudeResult = claude === '' ? 'created' : 'added';
+  }
+  return { agents: agentsResult, claude: claudeResult };
+}
+
 // 写操作串行执行：两次勾选几乎同时到达时，后一次必须读到前一次写入的结果。
 let writeQueue = Promise.resolve();
 function serialized(fn) {
@@ -204,6 +244,7 @@ const METHODS = {
   'project/update-todo': serialized(updateTodo),
   'project/add-todo': serialized(addTodo),
   'project/write-intro': serialized(writeIntro),
+  'project/add-entry': serialized(addEntry),
 };
 
 readline.createInterface({ input: process.stdin }).on('line', async (line) => {
