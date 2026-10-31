@@ -1,110 +1,32 @@
 'use strict';
 // 项目看板主视图。所有宿主能力经电子脑（main.js）代办；这里只画界面、发请求。
 
-const STRINGS = {
-  'zh-CN': {
-    refresh: '刷新', intro: '项目介绍', todos: '待办', files: '项目文件', tasks: '任务',
-    columns: { attention: '待处理', running: '运行中', done: '刚完成', idle: '其他' },
-    columnEmpty: '暂无', errored: '出错', archivedN: '已归档 {n} 个', tasksEmpty: '这个项目里还没有任务。',
-    tasksUnsupported: '当前 Cindy 版本还不能给插件提供任务列表，更新 Cindy 后即可在这里按状态查看任务。',
-    tasksDenied: '还没有允许查看任务。可在 Cindy 的插件详情页点「确认任务查看权限」。',
-    ago: { now: '刚刚', m: '{n} 分钟前', h: '{n} 小时前', d: '{n} 天前' },
-    introEmpty: '还没有项目介绍。让 AI 阅读项目后生成一份，保存在 .cindy/project.md，会随 git 提交。',
-    todosEmpty: '还没有待办。让 AI 整理一份，保存在 .cindy/todos.md，会随 git 提交。',
-    doneCount: '已完成 {n} 项', generate: '让 AI 生成', update: '让 AI 更新', create: '让 AI 创建', organize: '让 AI 整理',
-    view: '查看', missing: '未创建', ready: '已创建', truncated: '（内容较长，只显示前 100 KB）',
-    readme: 'README', agents: 'AGENTS.md', claude: 'CLAUDE.md', knowledge: '项目知识库',
-    branch: '分支', changes: '未提交改动', changesN: '{n} 个文件', clean: '无', commits: '最近提交', worktrees: 'worktree',
-    notGit: '这个目录不是 Git 仓库。',
-    worktreesWarn: '.cindy-worktrees/ 没有被 git 忽略，在主目录执行 git add . 可能把 worktree 副本加进提交。',
-    askHint: '确认或修改下面的提示词后发送，会在这个项目里新建一个任务并开始运行。', cancel: '取消', send: '发送到新任务', close: '关闭',
-    sent: '已在「{p}」新建任务，可以在侧边栏的项目里查看进度。',
-    sendErrors: {
-      PERMISSION_DENIED: '项目看板还没有新建任务的权限，请在 Cindy 的插件详情页允许后再试。',
-      TARGET_UNAVAILABLE: '这个项目在 Cindy 里已不可用，请刷新后重新选择项目。',
-      DELIVERY_UNCERTAIN: '不确定任务是否已经创建。请先在侧边栏这个项目下确认，没有再重新发送，避免重复。',
-      TIMEOUT: '等待太久没有结果，不确定任务是否已经创建。请先在侧边栏这个项目下确认，没有再重新发送，避免重复。',
-    },
-    noProjects: 'Cindy 里还没有项目。先在侧边栏添加一个项目文件夹。',
-    hostTooOld: '当前 Cindy 版本不支持读取项目列表，请更新 Cindy。',
-    changed: '待办文件刚被修改过，已重新读取，请再操作一次。', failed: '操作没有成功：{m}',
-    edit: '编辑', save: '保存', add: '添加', remove: '删除', newTask: '新建任务', todoNew: '新增一条待办，回车添加',
-    introChanged: '项目介绍刚在别处被修改过。你的内容还在编辑框里；再点一次保存会覆盖成你的版本，点取消可查看最新内容。',
-    introSaved: '项目介绍已保存到 .cindy/project.md。',
-    todoTaskHeading: '从待办新建任务',
-    addEntry: '加入资料入口', entryReady: '已含资料入口', joiner: '；', period: '。',
-    entryDone: { created: '新建了 AGENTS.md，写入项目资料入口', added: '已在 AGENTS.md 末尾加入项目资料入口', exists: 'AGENTS.md 已有项目资料入口' },
-    claudeDone: { created: '新建了 CLAUDE.md 并导入 AGENTS.md', added: '在 CLAUDE.md 末尾导入了 AGENTS.md', exists: '' },
-    select: '选择', selectedTask: '用选中的 {n} 条新建任务', manyTitle: '{t} 等 {n} 项',
-    todosPrompt: '请完成这个项目里的以下待办：\n{list}\n\n这些待办来自 .cindy/todos.md，每完成一条就把它改成「- [x]」。',
-    todoPrompt: '请完成这个项目里的一条待办：{t}\n\n这条待办来自 .cindy/todos.md，完成后请把它改成「- [x]」。',
-    titles: { intro: '生成项目介绍', todos: '整理待办', agents: '维护 AGENTS.md', claude: '维护 CLAUDE.md', knowledge: '维护项目知识库' },
-    prompts: {
-      intro: '请阅读这个项目的代码和文档，写一份项目介绍，保存到 .cindy/project.md（已存在就更新）。内容包括：一句话定位、项目目标、主要功能、技术栈、目录结构、如何运行和测试。用简洁的 Markdown。这个文件会提交到 git、团队成员都能看到，不要写入密钥、Token 或个人信息。',
-      todos: '请整理这个项目的待办清单，保存到 .cindy/todos.md（已存在就在原有基础上更新，保留已完成的条目）。来源可以是代码里的 TODO/FIXME、README 和文档里提到的计划，以及近期的改动。格式：每条一行，未完成写成「- [ ] 待办内容」，已完成写成「- [x] 待办内容」，可以用二级标题分组。这个文件会提交到 git，不要写入密钥、Token 或个人信息。',
-      agents: '请根据这个项目当前的代码、目录结构和约定，创建或更新根目录的 AGENTS.md：写清项目结构、常用命令（安装、运行、测试）、代码风格和团队约定，方便 AI Agent 和新成员快速上手。保留文件里仍然有效的内容。',
-      claude: '请创建或更新根目录的 CLAUDE.md。如果根目录已有 AGENTS.md，CLAUDE.md 只写一行「@AGENTS.md」引用它，避免两处重复维护；否则按 AGENTS.md 的写法整理项目结构、常用命令和团队约定。',
-      knowledge: '请检查并更新 .cindy/project-knowledge/ 里的项目知识：按模块整理关键抽象、模块边界和注意事项，修正过期内容，并让 TOC.md 保持为索引。新任务启动时会自动读取 TOC.md，请保持精简。',
-    },
-  },
-  en: {
-    refresh: 'Refresh', intro: 'About This Project', todos: 'To-dos', files: 'Project Files', tasks: 'Tasks',
-    columns: { attention: 'Needs you', running: 'Running', done: 'Just finished', idle: 'Other' },
-    columnEmpty: 'None', errored: 'Error', archivedN: '{n} archived', tasksEmpty: 'No tasks in this project yet.',
-    tasksUnsupported: 'This Cindy version cannot share tasks with plugins yet. Update Cindy to see tasks by status here.',
-    tasksDenied: 'Viewing tasks is not allowed yet. Open this plugin\'s details in Cindy and choose "Review task viewing permission".',
-    ago: { now: 'just now', m: '{n} min ago', h: '{n} h ago', d: '{n} d ago' },
-    introEmpty: 'No project introduction yet. Ask AI to read the project and write one to .cindy/project.md, committed with git.',
-    todosEmpty: 'No to-dos yet. Ask AI to compile them into .cindy/todos.md, committed with git.',
-    doneCount: '{n} done', generate: 'Generate with AI', update: 'Update with AI', create: 'Create with AI', organize: 'Organize with AI',
-    view: 'View', missing: 'Not created', ready: 'Created', truncated: '(Long file — showing the first 100 KB)',
-    readme: 'README', agents: 'AGENTS.md', claude: 'CLAUDE.md', knowledge: 'Project Knowledge',
-    branch: 'Branch', changes: 'Uncommitted', changesN: '{n} files', clean: 'None', commits: 'Recent commits', worktrees: 'Worktrees',
-    notGit: 'This folder is not a Git repository.',
-    worktreesWarn: '.cindy-worktrees/ is not ignored by git; running git add . in the main folder may commit the worktree copies.',
-    askHint: 'Review or edit the prompt, then send it. A new session will start in this project.', cancel: 'Cancel', send: 'Send to New Session', close: 'Close',
-    sent: 'Started a new session in "{p}". Follow it from the project in the sidebar.',
-    sendErrors: {
-      PERMISSION_DENIED: 'Project Board is not allowed to start sessions yet. Allow it in the plugin details in Cindy, then try again.',
-      TARGET_UNAVAILABLE: 'This project is no longer available in Cindy. Refresh and choose the project again.',
-      DELIVERY_UNCERTAIN: 'Not sure whether the session was created. Check this project in the sidebar first and only send again if it is missing, to avoid duplicates.',
-      TIMEOUT: 'No answer in time, so the session may or may not have been created. Check this project in the sidebar first and only send again if it is missing, to avoid duplicates.',
-    },
-    noProjects: 'No projects in Cindy yet. Add a project folder from the sidebar first.',
-    hostTooOld: 'This Cindy version cannot list projects for plugins. Please update Cindy.',
-    changed: 'The to-do file just changed and was reloaded. Please try again.', failed: 'That did not work: {m}',
-    edit: 'Edit', save: 'Save', add: 'Add', remove: 'Delete', newTask: 'New Session', todoNew: 'Add a to-do and press Enter',
-    introChanged: 'The introduction was just changed elsewhere. Your text is still in the editor; save again to overwrite it with your version, or cancel to see the latest.',
-    introSaved: 'Saved the introduction to .cindy/project.md.',
-    todoTaskHeading: 'New session from to-do',
-    addEntry: 'Add notes entry', entryReady: 'Notes entry included', joiner: '; ', period: '.',
-    entryDone: { created: 'Created AGENTS.md with the project notes entry', added: 'Added the project notes entry to the end of AGENTS.md', exists: 'AGENTS.md already has the project notes entry' },
-    claudeDone: { created: 'created CLAUDE.md importing AGENTS.md', added: 'added an AGENTS.md import to the end of CLAUDE.md', exists: '' },
-    select: 'Select', selectedTask: 'New session with {n} selected', manyTitle: '{t} and {n} more',
-    todosPrompt: 'Please complete these to-dos in the project:\n{list}\n\nThese items come from .cindy/todos.md. Change each one to "- [x]" when it is done.',
-    todoPrompt: 'Please complete this to-do in the project: {t}\n\nThis item comes from .cindy/todos.md. When it is done, change it to "- [x]".',
-    titles: { intro: 'Generate project introduction', todos: 'Organize to-dos', agents: 'Maintain AGENTS.md', claude: 'Maintain CLAUDE.md', knowledge: 'Maintain project knowledge' },
-    prompts: {
-      intro: "Read this project's code and docs and write a project introduction to .cindy/project.md (update it if it already exists). Cover: a one-line summary, goals, main features, tech stack, directory layout, and how to run and test it. Keep the Markdown concise. This file is committed to git and visible to the whole team, so do not include secrets, tokens, or personal information.",
-      todos: "Compile this project's to-do list into .cindy/todos.md (if it already exists, update it and keep completed items). Sources can include TODO/FIXME comments, plans in the README and docs, and recent changes. Format: one item per line, \"- [ ] item\" for open items and \"- [x] item\" for completed ones; level-2 headings may group items. This file is committed to git, so do not include secrets, tokens, or personal information.",
-      agents: "Based on this project's current code, layout, and conventions, create or update AGENTS.md at the repository root: describe the project structure, common commands (install, run, test), code style, and team conventions so AI agents and new teammates can get started quickly. Keep any content that is still accurate.",
-      claude: 'Create or update CLAUDE.md at the repository root. If AGENTS.md already exists at the root, make CLAUDE.md a single line, "@AGENTS.md", so the two files are not maintained twice; otherwise write it the way AGENTS.md would be written.',
-      knowledge: 'Review and update the project knowledge in .cindy/project-knowledge/: organize key abstractions, module boundaries, and caveats by module, fix outdated content, and keep TOC.md as the index. New sessions read TOC.md automatically, so keep it concise.',
-    },
-  },
-};
+// 界面文案在 main-view-i18n.js（STRINGS）。
 const FILES = ['readme', 'agents', 'claude', 'knowledge'];
+const ALL = '__all__'; // 项目下拉框里「全部项目」一项的值
+const LINKS_KEY = 'project-board:links';
 const AI_FILES = new Set(['agents', 'claude', 'knowledge']);
 
 let S = STRINGS.en;
 let lang = 'en';
 let projects = [];
-let current = null; // { id, label }
+let current = null; // { id, label }：正在看的项目（总览时保留上次看的项目）
+let view = 'project'; // 'project' 单个项目 / 'all' 全部项目总览
 let snap = null;
 let taskList = null; // null = 尚未读到；{ error } = 读取失败
 let ask = null; // { heading, title, text }
 let selected = null; // 多选模式下为选中待办的文字集合（按文字记，AI 改动文件导致行号变化时不丢），不在多选模式时为 null
 let editingIntro = null; // 正在编辑时为打开编辑时读到的内容，保存时用来核对文件是否被别处改过
+
+// 文言文界面用简体 / 繁体中文，其他没有翻译的语言按语种前缀找，最后回退到英文。
+function pickLang(locale) {
+  const value = String(locale || '');
+  if (STRINGS[value]) return value;
+  if (value === 'zh-Hans-x-lzh') return 'zh-CN';
+  if (/^zh-(Hant|TW|HK|MO)/.test(value)) return 'zh-TW';
+  const base = value.split('-')[0];
+  return Object.keys(STRINGS).find((k) => k.split('-')[0] === base) || 'en';
+}
 
 const $ = (id) => document.getElementById(id);
 const fmt = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => vars[k]);
@@ -114,6 +36,11 @@ const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>
 const channel = new BroadcastChannel('project-board');
 const pending = new Map();
 channel.onmessage = ({ data }) => {
+  if (data?.type === 'event') {
+    // 一轮结束、任务新建 / 归档时 AI 可能改了文件，连资料一起重读；其余（开始、审批、提问）只重读任务。
+    scheduleRefresh(data.dropped > 0 || /^did-(turn-end|session-)/.test(data.name));
+    return;
+  }
   const p = data?.type === 'res' && pending.get(data.reqId);
   if (!p) return;
   pending.delete(data.reqId);
@@ -190,6 +117,37 @@ function markdown(src) {
   if (code !== null) out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
   return out.join('');
 }
+
+// ---------- 刷新时保留界面状态：折叠区是否展开、各列表的滚动位置 ----------
+// 需要保留的元素带 data-keep；重绘前记下、重绘后恢复。切换项目时清空。
+const kept = new Map();
+function withKept(draw) {
+  for (const el of document.querySelectorAll('[data-keep]')) kept.set(el.dataset.keep, { open: el.open, scroll: el.scrollTop });
+  const pageScroll = document.scrollingElement.scrollTop;
+  draw();
+  for (const el of document.querySelectorAll('[data-keep]')) {
+    const state = kept.get(el.dataset.keep);
+    if (!state) continue;
+    if (el.tagName === 'DETAILS') el.open = state.open;
+    el.scrollTop = state.scroll;
+  }
+  document.scrollingElement.scrollTop = pageScroll;
+}
+
+// ---------- 待办与任务的对应：只存在本机（任务 ID 对别的电脑没有意义），不写进 todos.md ----------
+// 结构：{ [项目目录]: { [待办文字]: 任务 ID } }。按文字记，在看板里改文字时一并迁移。
+function readLinks() {
+  try { return JSON.parse(localStorage.getItem(LINKS_KEY)) || {}; } catch { return {}; }
+}
+function updateLinks(dir, change) {
+  const all = readLinks();
+  const links = { ...(all[dir] || {}) };
+  change(links);
+  if (Object.keys(links).length) all[dir] = links;
+  else delete all[dir];
+  try { localStorage.setItem(LINKS_KEY, JSON.stringify(all)); } catch { /* 存不了就不记 */ }
+}
+const linksFor = (dir) => readLinks()[dir] || {};
 
 // ---------- 渲染 ----------
 function toast(text) {
@@ -311,7 +269,8 @@ function askForSelected() {
     heading: S.todoTaskHeading,
     title: items.length === 1 ? first : fmt(S.manyTitle, { t: first, n: items.length }),
     text: fmt(S.todosPrompt, { list: items.map((t) => `- ${t.text}`).join('\n') }),
-    onSent: () => { selected = null; renderTodos(); },
+    todos: items.map((t) => t.text),
+    onSent: () => { selected = null; },
   });
 }
 
@@ -329,6 +288,11 @@ function renderTodos() {
     body.innerHTML = `<p class="empty">${esc(S.todosEmpty)}</p>`;
     return;
   }
+  // 待办已不在文件里（被删除或被 AI 改了文字）时，丢掉它的对应记录。
+  const links = linksFor(current.id);
+  const texts = new Set(snap.todos.map((t) => t.text));
+  if (Object.keys(links).some((text) => !texts.has(text)))
+    updateLinks(current.id, (l) => { for (const text of Object.keys(l)) if (!texts.has(text)) delete l[text]; });
   const list = (items, into) => {
     let group = null;
     for (const t of items) {
@@ -359,6 +323,7 @@ function renderTodos() {
       text.className = 'text';
       text.innerHTML = inline(t.text);
       label.append(box, text);
+      const chip = linkChip(links[t.text]);
       const acts = document.createElement('span');
       acts.className = 'acts';
       if (selected) {
@@ -368,6 +333,7 @@ function renderTodos() {
           heading: S.todoTaskHeading,
           title: t.text.length > 60 ? `${t.text.slice(0, 60)}…` : t.text,
           text: fmt(S.todoPrompt, { t: t.text }),
+          todos: [t.text],
         }), 'ai'));
       }
       if (!selected) {
@@ -376,7 +342,7 @@ function renderTodos() {
           todoButton(S.remove, () => updateTodo(t, { remove: true }), 'ghost danger'),
         );
       }
-      row.append(label, acts);
+      row.append(...[label, chip, acts].filter(Boolean));
       into.append(row);
     }
   };
@@ -390,6 +356,7 @@ function renderTodos() {
   if (done.length && !selected) {
     const details = document.createElement('details');
     details.className = 'done-list';
+    details.dataset.keep = 'todos:done';
     const summary = document.createElement('summary');
     summary.textContent = fmt(S.doneCount, { n: done.length });
     details.append(summary);
@@ -476,6 +443,22 @@ function ago(ms) {
   return fmt(S.ago.d, { n: Math.floor(min / 1440) });
 }
 
+// 待办旁的任务状态：只在任务还能查到时显示，点一下打开任务。
+function linkChip(taskId) {
+  const task = taskId && Array.isArray(taskList) ? taskList.find((x) => x.id === taskId) : null;
+  if (!task) return null;
+  const state = task.archived ? 'archived' : task.status;
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = `link-chip s-${state}`;
+  chip.textContent = S.link[state] || S.link.idle;
+  chip.title = `${S.link.open}: ${task.title}`;
+  chip.addEventListener('click', () => openTask(task.id));
+  return chip;
+}
+
+const openTask = (taskId) => call('openTask', { taskId }).catch((err) => toast(fmt(S.failed, { m: err.message })));
+
 function taskItem(task) {
   const li = document.createElement('li');
   const button = document.createElement('button');
@@ -494,7 +477,7 @@ function taskItem(task) {
     meta.append(err);
   }
   button.append(title, meta);
-  button.addEventListener('click', () => call('openTask', { taskId: task.id }).catch((err) => toast(fmt(S.failed, { m: err.message }))));
+  button.addEventListener('click', () => openTask(task.id));
   li.append(button);
   return li;
 }
@@ -526,6 +509,7 @@ function renderTasks() {
     const head = document.createElement('h3');
     head.textContent = `${S.columns[key]} ${items.length}`;
     const ul = document.createElement('ul');
+    ul.dataset.keep = `tasks:${key}`;
     if (items.length) ul.append(...items.map(taskItem));
     else ul.innerHTML = `<li class="empty">${esc(S.columnEmpty)}</li>`;
     column.append(head, ul);
@@ -535,10 +519,12 @@ function renderTasks() {
   if (archived.length) {
     const details = document.createElement('details');
     details.className = 'archived';
+    details.dataset.keep = 'tasks:archived';
     const summary = document.createElement('summary');
     summary.textContent = fmt(S.archivedN, { n: archived.length });
     const ul = document.createElement('ul');
     ul.className = 'archived-list';
+    ul.dataset.keep = 'tasks:archived-list';
     ul.append(...archived.map(taskItem));
     details.append(summary, ul);
     body.append(details);
@@ -547,16 +533,21 @@ function renderTasks() {
 
 function render() {
   $('board').hidden = false;
-  renderTasks();
-  renderIntro();
-  renderTodos();
-  renderFiles();
-  renderGit();
+  withKept(() => {
+    renderTasks();
+    renderIntro();
+    renderTodos();
+    renderFiles();
+    renderGit();
+  });
 }
 
 // ---------- 操作 ----------
 async function load() {
+  if (view === 'all') return loadOverview();
   if (!current) return;
+  $('overview').hidden = true;
+  $('path').hidden = false;
   $('path').textContent = current.id;
   const dir = current.id;
   // 任务列表失败（旧版 Cindy、未授权）不影响项目资料的展示。
@@ -572,12 +563,39 @@ async function load() {
   render();
 }
 
+// 只重读任务（任务事件触发时用）；资料和 Git 不动，省掉 Node 进程读文件和跑 git。
+async function loadTasks() {
+  if (view === 'all') return loadOverview();
+  if (!current || !snap) return load();
+  const dir = current.id;
+  let next;
+  try {
+    next = await call('tasks', { dir });
+  } catch (err) {
+    next = { error: err.code || err.message };
+  }
+  if (view !== 'project' || current?.id !== dir) return;
+  taskList = next;
+  withKept(() => {
+    renderTasks();
+    renderTodos();
+  });
+}
+
 // change：{done} 勾选、{text} 改文字、{remove:true} 删除。box 是触发勾选的复选框，失败时恢复原状。
 async function updateTodo(todo, change, box) {
   if (box) box.disabled = true;
   try {
-    const res = await call('updateTodo', { dir: current.id, line: todo.line, text: todo.text, change });
+    const dir = current.id;
+    const res = await call('updateTodo', { dir, line: todo.line, text: todo.text, change });
     if (!res.ok) toast(S.changed);
+    else if (change.remove || change.text !== undefined) {
+      updateLinks(dir, (links) => {
+        const taskId = links[todo.text];
+        delete links[todo.text];
+        if (taskId && change.text !== undefined) links[change.text.replace(/\s+/g, ' ').trim()] = taskId;
+      });
+    }
   } catch (err) {
     if (box) box.checked = !box.checked;
     toast(fmt(S.failed, { m: err.message }));
@@ -627,18 +645,129 @@ $('ask').addEventListener('close', async () => {
   const project = current;
   const sending = ask; // 发送期间可能又打开新的提问框，这里固定本次的内容
   try {
-    await call('askAi', {
+    const res = await call('askAi', {
       dir: project.id,
       title: sending.title,
       text,
       requestKey: `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     });
+    if (sending.todos && res?.taskId) updateLinks(project.id, (links) => { for (const t of sending.todos) links[t] = res.taskId; });
     toast(fmt(S.sent, { p: project.label }));
     sending.onSent?.();
+    if (view === 'project' && current?.id === project.id) loadTasks();
   } catch (err) {
     toast(S.sendErrors[err.code] || fmt(S.failed, { m: err.message }));
   }
 });
+
+// ---------- 全部项目总览 ----------
+const ATTENTION = new Set(['awaiting', 'error']);
+
+async function loadOverview() {
+  $('board').hidden = true;
+  $('path').hidden = true;
+  const rows = await Promise.all(projects.map(async (p) => {
+    const [tasks, summary] = await Promise.allSettled([call('tasks', { dir: p.id }), call('summary', { dir: p.id })]);
+    return { project: p, tasks: tasks.status === 'fulfilled' ? tasks.value : null, summary: summary.status === 'fulfilled' ? summary.value : null };
+  }));
+  if (view !== 'all') return;
+  notice('');
+  withKept(() => renderOverview(rows));
+}
+
+function renderOverview(rows) {
+  const box = $('overview');
+  box.hidden = false;
+  const stats = rows.map((row) => {
+    const active = (row.tasks || []).filter((t) => !t.archived);
+    return {
+      ...row,
+      attention: active.filter((t) => ATTENTION.has(t.status)).length,
+      running: active.filter((t) => t.status === 'running').length,
+      last: Math.max(0, ...(row.tasks || []).map((t) => t.lastActivityAt)),
+    };
+  });
+  // 等你处理的排最前，其次是正在跑的，再按最近活动排。
+  stats.sort((a, b) => b.attention - a.attention || b.running - a.running || b.last - a.last);
+  box.replaceChildren(...stats.map(projectCard));
+}
+
+function projectCard(row) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'card project-card';
+  card.title = S.openProject;
+  const head = document.createElement('div');
+  head.className = 'pc-head';
+  const name = document.createElement('strong');
+  name.textContent = row.project.label;
+  const where = document.createElement('small');
+  where.textContent = row.project.detail || row.project.id;
+  head.append(name, where);
+
+  const badges = document.createElement('div');
+  badges.className = 'pc-badges';
+  const badge = (text, cls) => {
+    const b = document.createElement('span');
+    b.className = `pc-badge ${cls}`;
+    b.textContent = text;
+    badges.append(b);
+  };
+  if (!row.tasks && !row.summary) badge(S.overview.failed, 'muted');
+  if (row.attention) badge(fmt(S.overview.attention, { n: row.attention }), 'attention');
+  if (row.running) badge(fmt(S.overview.running, { n: row.running }), 'running');
+  if (row.tasks && !row.attention && !row.running) badge(S.overview.quiet, 'muted');
+  if (row.summary) badge(row.summary.openTodos ? fmt(S.overview.todos, { n: row.summary.openTodos }) : S.overview.noTodos, row.summary.openTodos ? 'todos' : 'muted');
+
+  const meta = document.createElement('small');
+  meta.className = 'pc-meta';
+  const git = row.summary?.git;
+  meta.textContent = [
+    git?.branch,
+    git?.changedFiles ? fmt(S.overview.changes, { n: git.changedFiles }) : '',
+    row.tasks ? (row.last ? fmt(S.overview.last, { t: ago(row.last) }) : S.overview.noTasks) : '',
+  ].filter(Boolean).join(' · ');
+
+  card.append(head, badges, meta);
+  card.addEventListener('click', () => switchTo(row.project.id));
+  return card;
+}
+
+// ---------- 切换项目 / 刷新 ----------
+function switchTo(id) {
+  $('project').value = id;
+  kept.clear();
+  editingIntro = null;
+  selected = null;
+  if (id === ALL) view = 'all';
+  else {
+    view = 'project';
+    if (current?.id !== id) { snap = null; taskList = null; }
+    current = projects.find((p) => p.id === id);
+  }
+  remember(id);
+  load();
+}
+
+// 正在改待办文字时不自动重绘，免得冲掉输入框（项目介绍编辑中由 renderIntro 自己跳过）。
+const idle = () => !document.hidden && !document.activeElement?.matches('.todo input.edit');
+let refreshTimer = null;
+let refreshFull = false;
+function scheduleRefresh(full) {
+  refreshFull = refreshFull || full;
+  clearTimeout(refreshTimer);
+  // 页面在后台时不刷新，回到页面时会整体重读。
+  if (document.hidden) return;
+  refreshTimer = setTimeout(() => {
+    if (!idle()) {
+      refreshTimer = setTimeout(() => scheduleRefresh(false), 3000);
+      return;
+    }
+    const all = refreshFull;
+    refreshFull = false;
+    (all ? load() : loadTasks()).catch(() => {});
+  }, 800);
+}
 
 function remember(id) {
   try { localStorage.setItem('project-board:last', id); } catch { /* 存不了就不记 */ }
@@ -649,7 +778,7 @@ function recalled() {
 
 async function init() {
   const ctx = await (await fetch('/app-context')).json();
-  lang = STRINGS[ctx.context?.locale] ? ctx.context.locale : 'en';
+  lang = pickLang(ctx.context?.locale);
   S = STRINGS[lang];
   document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = S[el.dataset.t]; });
   $('refresh').textContent = S.refresh;
@@ -660,7 +789,7 @@ async function init() {
   $('intro-edit').addEventListener('click', startIntroEdit);
   $('todo-select').addEventListener('click', toggleSelecting);
   $('todo-select-task').addEventListener('click', askForSelected);
-  $('refresh').addEventListener('click', load);
+  $('refresh').addEventListener('click', () => load());
 
   try {
     projects = await call('projects');
@@ -673,22 +802,21 @@ async function init() {
     return;
   }
   const select = $('project');
+  if (projects.length > 1) select.append(new Option(S.allProjects, ALL));
   for (const p of projects) select.append(new Option(p.label, p.id));
-  current = projects.find((p) => p.id === recalled()) || projects[0];
-  select.value = current.id;
-  select.addEventListener('change', () => {
-    current = projects.find((p) => p.id === select.value);
-    editingIntro = null;
-    selected = null;
-    remember(current.id);
-    load();
-  });
-  await load();
-  // AI 在后台改文件：回到页面时刷新，停留期间每 20 秒刷新一次。
-  // 正在改某条待办的文字时跳过，免得重绘冲掉输入框。
-  const idle = () => !document.hidden && !document.activeElement?.matches('.todo input.edit');
+  select.addEventListener('change', () => switchTo(select.value));
+  const last = recalled();
+  current = projects.find((p) => p.id === last) || projects[0];
+  // 多个项目时默认先看总览。
+  switchTo(last === ALL || (!projects.some((p) => p.id === last) && projects.length > 1) ? ALL : current.id);
+  // 任务事件到达时会立即刷新（见 channel.onmessage）；这里是兜底：
+  // 自动化等不推送事件的任务每 30 秒重读一次，AI 在后台改的文件每 60 秒整体重读一次。
   document.addEventListener('visibilitychange', () => { if (idle()) load(); });
-  setInterval(() => { if (idle()) load(); }, 20000);
+  let tick = 0;
+  setInterval(() => {
+    tick += 1;
+    if (idle()) (tick % 2 === 0 ? load() : loadTasks()).catch(() => {});
+  }, 30000);
 }
 
 init();

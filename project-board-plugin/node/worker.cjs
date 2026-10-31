@@ -101,6 +101,21 @@ async function gitStatus(dir) {
   };
 }
 
+/** 总览卡片用的轻量摘要：只读待办计数与分支、未提交改动数。 */
+async function summary({ dir }) {
+  const todos = await readDoc(dir, DOCS.todos);
+  const items = todos ? parseTodos(todos.content) : [];
+  let repo = null;
+  if ((await git(dir, ['rev-parse', '--is-inside-work-tree'])) === 'true') {
+    const [branch, porcelain] = await Promise.all([
+      git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']),
+      git(dir, ['status', '--porcelain=v1']),
+    ]);
+    repo = { branch, changedFiles: porcelain ? porcelain.split('\n').length : 0 };
+  }
+  return { openTodos: items.filter((t) => !t.done).length, doneTodos: items.filter((t) => t.done).length, git: repo };
+}
+
 async function snapshot({ dir }) {
   const entries = await Promise.all(Object.entries(DOCS).map(async ([id, rel]) => [id, await readDoc(dir, rel)]));
   const docs = Object.fromEntries(entries);
@@ -192,6 +207,14 @@ async function writeIntro({ dir, content, expected }) {
 // AGENTS.md 里的「项目资料」入口：Codex 读 AGENTS.md，Claude Code 读 CLAUDE.md（经 @AGENTS.md 导入）。
 const ENTRY = {
   'zh-CN': ['## 项目资料', '', `- 项目介绍：\`${DOCS.intro}\``, `- 待办清单：\`${DOCS.todos}\`（完成一条就把该行的 \`- [ ]\` 改成 \`- [x]\`）`],
+  'zh-TW': ['## 專案資料', '', `- 專案介紹：\`${DOCS.intro}\``, `- 待辦清單：\`${DOCS.todos}\`（完成一條就把該行的 \`- [ ]\` 改成 \`- [x]\`）`],
+  ja: ['## プロジェクト資料', '', `- プロジェクト紹介：\`${DOCS.intro}\``, `- ToDo リスト：\`${DOCS.todos}\`（完了した項目は行頭の \`- [ ]\` を \`- [x]\` に変更）`],
+  ko: ['## 프로젝트 자료', '', `- 프로젝트 소개: \`${DOCS.intro}\``, `- 할 일 목록: \`${DOCS.todos}\` (완료한 항목은 \`- [ ]\`를 \`- [x]\`로 변경)`],
+  es: ['## Notas del proyecto', '', `- Presentación del proyecto: \`${DOCS.intro}\``, `- Lista de pendientes: \`${DOCS.todos}\` (al terminar un elemento, cambia su \`- [ ]\` por \`- [x]\`)`],
+  fr: ['## Notes du projet', '', `- Présentation du projet : \`${DOCS.intro}\``, `- Liste des tâches à faire : \`${DOCS.todos}\` (remplacez \`- [ ]\` par \`- [x]\` quand un élément est terminé)`],
+  de: ['## Projektnotizen', '', `- Projektbeschreibung: \`${DOCS.intro}\``, `- To-do-Liste: \`${DOCS.todos}\` (erledigte Einträge von \`- [ ]\` auf \`- [x]\` ändern)`],
+  'pt-BR': ['## Notas do projeto', '', `- Apresentação do projeto: \`${DOCS.intro}\``, `- Lista de pendências: \`${DOCS.todos}\` (ao concluir um item, troque \`- [ ]\` por \`- [x]\`)`],
+  'pt-PT': ['## Notas do projeto', '', `- Apresentação do projeto: \`${DOCS.intro}\``, `- Lista de tarefas pendentes: \`${DOCS.todos}\` (ao concluir um item, troque \`- [ ]\` por \`- [x]\`)`],
   en: ['## Project Notes', '', `- Project introduction: \`${DOCS.intro}\``, `- To-do list: \`${DOCS.todos}\` (change an item's \`- [ ]\` to \`- [x]\` when it is done)`],
 };
 const hasEntry = (content) => content.includes(DOCS.intro) && content.includes(DOCS.todos);
@@ -241,6 +264,7 @@ function serialized(fn) {
 
 const METHODS = {
   'project/snapshot': snapshot,
+  'project/summary': summary,
   'project/update-todo': serialized(updateTodo),
   'project/add-todo': serialized(addTodo),
   'project/write-intro': serialized(writeIntro),

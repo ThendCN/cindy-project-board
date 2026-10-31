@@ -39,6 +39,7 @@ async function askAi({ dir, title, text, requestKey }) {
 const OPS = {
   projects: () => listProjects(),
   snapshot: ({ dir }) => node('project/snapshot', { dir }),
+  summary: ({ dir }) => node('project/summary', { dir }),
   updateTodo: (args) => node('project/update-todo', args),
   addTodo: (args) => node('project/add-todo', args),
   writeIntro: (args) => node('project/write-intro', args),
@@ -70,3 +71,10 @@ channel.onmessage = async ({ data }) => {
   if (results.size > 200) results.delete(results.keys().next().value);
   channel.postMessage(res);
 };
+
+// 任务事件（只有元数据，不含内容）转给主视图，主视图据此及时刷新。
+// 思考开始/结束太频繁、切换任务只是用户换了个任务看，都不改变状态，不转。
+cindy.onHostMessage((msg) => {
+  if (msg?.type !== 'event' || /^did-(thinking-|session-switched)/.test(msg.name)) return;
+  channel.postMessage({ type: 'event', name: msg.name, dropped: msg.dropped || 0 });
+});

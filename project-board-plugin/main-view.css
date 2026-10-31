@@ -92,3 +92,25 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 .scroll { max-height: 60vh; overflow: auto; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; max-width: 90vw; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+
+/* 待办旁的任务状态 */
+.link-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; font-size: 11px; line-height: 20px; color: var(--muted); background: transparent; }
+.link-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.link-chip.s-running, .link-chip.s-awaiting { color: var(--accent); }
+.link-chip.s-awaiting { font-weight: 600; }
+.link-chip.s-error { color: var(--danger); }
+.link-chip.s-done { color: var(--fg); }
+
+/* 全部项目总览 */
+.overview { display: grid; gap: 12px; padding: 16px 24px 32px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.project-card { display: flex; flex-direction: column; gap: 10px; text-align: left; border-radius: 12px; padding: 14px 16px; color: var(--fg); }
+.project-card:hover { background: var(--hover); }
+.pc-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pc-head strong { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-head small, .pc-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.pc-badge { font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 9999px; border: 1px solid var(--line); }
+.pc-badge.attention { color: var(--danger); border-color: currentColor; font-weight: 600; }
+.pc-badge.running { color: var(--accent); border-color: currentColor; }
+.pc-badge.muted { color: var(--muted); }
+
