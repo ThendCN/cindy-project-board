@@ -1,2 +1,6 @@
 # 打包产物，每次 ghost_forge_pack / install 会重新生成
 project-board-plugin/*.cindy
+
+# Cindy 上游源码（独立 git 仓库，用于提底座 PR）
+/cindy/
+/cindy-worktrees/
