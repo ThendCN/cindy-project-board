@@ -6,8 +6,12 @@
   <link rel="stylesheet" href="main-view.css">
 </head>
 <body>
+  <div class="shell">
+  <nav id="rail" class="rail" aria-label="Projects"></nav>
+  <div class="main">
   <header class="top">
     <div class="title-row">
+      <h1 id="title"></h1>
       <select id="project" aria-label="Project"></select>
       <button id="refresh" class="ghost" type="button"></button>
     </div>
@@ -20,25 +24,44 @@
       <div class="card-head"><h2><span data-t="tasks"></span> <span id="task-count" class="count"></span></h2></div>
       <div id="task-body"></div>
     </section>
-    <section class="card todos">
-      <div class="card-head"><h2><span data-t="todos"></span> <span id="todo-count" class="count"></span></h2><span class="head-acts"><button id="todo-select" class="ghost" type="button"></button><button class="ai" type="button" data-ai="todos"></button></span></div>
-      <form id="todo-add" class="todo-add"><input id="todo-new" maxlength="500"><button data-t="add"></button></form>
-      <div id="todo-body" data-keep="todos:body"></div>
-      <div id="todo-select-bar" class="select-bar" hidden><button id="todo-select-task" class="ai" type="button"></button></div>
-    </section>
-    <section class="card intro">
-      <div class="card-head"><h2 data-t="intro"></h2><span class="head-acts"><button id="intro-edit" class="ghost" type="button" data-t="edit"></button><button class="ai" type="button" data-ai="intro"></button></span></div>
-      <div id="intro-body" class="md" data-keep="intro:body"></div>
-    </section>
-    <section class="card files">
-      <div class="card-head"><h2 data-t="files"></h2></div>
-      <ul id="file-list" class="file-list"></ul>
-    </section>
-    <section class="card git">
-      <div class="card-head"><h2>Git</h2></div>
-      <div id="git-body"></div>
-    </section>
+    <div class="col">
+      <section class="card todos">
+        <div class="card-head"><h2><span data-t="todos"></span> <span id="todo-count" class="count"></span></h2><span class="head-acts"><button id="todo-select" class="ghost" type="button"></button><button class="ai" type="button" data-ai="todos"></button></span></div>
+        <form id="todo-add" class="todo-add"><input id="todo-new" maxlength="500"><button data-t="add"></button></form>
+        <div id="todo-body" data-keep="todos:body"></div>
+        <div id="todo-select-bar" class="select-bar" hidden><button id="todo-select-task" class="ai" type="button"></button></div>
+      </section>
+      <section class="card intro">
+        <div class="card-head"><h2 data-t="intro"></h2><span class="head-acts"><button id="intro-edit" class="ghost" type="button" data-t="edit"></button><button class="ai" type="button" data-ai="intro"></button></span></div>
+        <div id="intro-body" class="md" data-keep="intro:body"></div>
+        <button id="intro-more" class="more" type="button" hidden></button>
+      </section>
+    </div>
+    <div class="col">
+      <section class="card library">
+        <div class="card-head"><h2 data-t="library"></h2><span class="head-acts"><button class="ai" type="button" data-ai="extract"></button><button class="ai" type="button" data-ai="knowledge"></button></span></div>
+        <div id="candidates" hidden>
+          <div class="lib-head"><span data-t="candidates"></span><span id="candidate-count"></span></div>
+          <div id="candidate-body" class="notes" data-keep="library:candidates"></div>
+        </div>
+        <div class="lib-head"><span data-t="knowledge"></span><span class="lib-acts"><span id="knowledge-count"></span><button id="file-upload" class="ghost small" type="button" data-t="upload"></button><input id="file-input" type="file" multiple hidden></span></div>
+        <ul id="knowledge-list" class="file-list"></ul>
+        <div class="lib-head"><span data-t="notes"></span><span id="note-count"></span></div>
+        <form id="note-add" class="todo-add"><input id="note-new" maxlength="10000"><button data-t="add"></button></form>
+        <div id="note-body" class="notes" data-keep="library:notes"></div>
+        <details class="config-files" data-keep="library:config">
+          <summary data-t="files"></summary>
+          <ul id="file-list" class="file-list"></ul>
+        </details>
+      </section>
+      <section class="card git">
+        <div class="card-head"><h2>Git</h2></div>
+        <div id="git-body"></div>
+      </section>
+    </div>
   </main>
+  </div>
+  </div>
 
   <dialog id="ask">
     <form method="dialog" class="dialog">
@@ -51,11 +74,21 @@
       </div>
     </form>
   </dialog>
-  <dialog id="viewer">
-    <form method="dialog" class="dialog wide">
+  <dialog id="confirm">
+    <form method="dialog" class="dialog">
+      <h3 id="confirm-title"></h3>
+      <div id="confirm-body" class="md scroll"></div>
+      <div class="actions">
+        <button value="cancel" class="ghost" data-t="cancel"></button>
+        <button value="ok" class="primary" data-t="remove"></button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="viewer" class="wide">
+    <form method="dialog" class="dialog">
       <h3 id="viewer-title"></h3>
-      <div id="viewer-body" class="md scroll"></div>
-      <div class="actions"><button value="close" class="ghost" data-t="close"></button></div>
+      <div id="viewer-body"></div>
+      <div id="viewer-actions" class="actions"></div>
     </form>
   </dialog>
   <div id="toast" class="toast" hidden></div>

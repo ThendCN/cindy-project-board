@@ -2,10 +2,13 @@
 // 项目看板主视图。所有宿主能力经电子脑（main.js）代办；这里只画界面、发请求。
 
 // 界面文案在 main-view-i18n.js（STRINGS）。
-const FILES = ['readme', 'agents', 'claude', 'knowledge'];
+const FILES = ['readme', 'agents', 'claude']; // 折叠在资料库底部的配置文件
 const ALL = '__all__'; // 项目下拉框里「全部项目」一项的值
 const LINKS_KEY = 'project-board:links';
-const AI_FILES = new Set(['agents', 'claude', 'knowledge']);
+const AI_FILES = new Set(['agents', 'claude']);
+const RECENT_NOTES = 3; // 资料库默认露出的资料条数，其余折叠
+const UPLOAD_CHUNK = 160 * 1024; // 每次发给工作进程的字节数：base64 后要在宿主单次请求 256 KB 的上限以内
+const MAX_UPLOAD = 50 * 1024 * 1024; // 资料随 git 提交，太大的文件不收
 
 let S = STRINGS.en;
 let lang = 'en';
@@ -14,9 +17,11 @@ let current = null; // { id, label }：正在看的项目（总览时保留上�
 let view = 'project'; // 'project' 单个项目 / 'all' 全部项目总览
 let snap = null;
 let taskList = null; // null = 尚未读到；{ error } = 读取失败
+const stats = new Map(); // 项目 id → { tasks, summary }：项目栏和总览用；读不到为 null（旧版 Cindy 没有任务接口）
 let ask = null; // { heading, title, text }
 let selected = null; // 多选模式下为选中待办的文字集合（按文字记，AI 改动文件导致行号变化时不丢），不在多选模式时为 null
 let editingIntro = null; // 正在编辑时为打开编辑时读到的内容，保存时用来核对文件是否被别处改过
+let introOpen = false; // 项目介绍是否展开全文；切换项目时收起
 
 // 文言文界面用简体 / 繁体中文，其他没有翻译的语言按语种前缀找，最后回退到英文。
 function pickLang(locale) {
@@ -38,7 +43,8 @@ const pending = new Map();
 channel.onmessage = ({ data }) => {
   if (data?.type === 'event') {
     // 一轮结束、任务新建 / 归档时 AI 可能改了文件，连资料一起重读；其余（开始、审批、提问）只重读任务。
-    scheduleRefresh(data.dropped > 0 || /^did-(turn-end|session-)/.test(data.name));
+    // board-changed 是 Agent 经插件工具记了待办或资料。
+    scheduleRefresh(data.dropped > 0 || /^(did-(turn-end|session-)|board-changed$)/.test(data.name));
     return;
   }
   const p = data?.type === 'res' && pending.get(data.reqId);
@@ -168,6 +174,15 @@ function renderIntro() {
   $('intro-edit').disabled = Boolean(intro?.truncated);
   $('intro-body').innerHTML = intro ? markdown(intro.content) : `<p class="empty">${esc(S.introEmpty)}</p>`;
   document.querySelector('[data-ai="intro"]').textContent = intro ? S.update : S.generate;
+  fitIntro();
+}
+
+// 收起时只露出开头；内容本来就短就不显示「展开全文」。
+function fitIntro() {
+  const body = $('intro-body');
+  document.querySelector('.card.intro').classList.toggle('collapsed', !introOpen);
+  $('intro-more').hidden = !introOpen && body.scrollHeight <= body.clientHeight + 4;
+  $('intro-more').textContent = introOpen ? S.introLess : S.introMore;
 }
 
 function startIntroEdit() {
@@ -191,6 +206,8 @@ function startIntroEdit() {
   acts.append(cancel, save);
   box.append(area, acts);
   $('intro-body').replaceChildren(box);
+  document.querySelector('.card.intro').classList.remove('collapsed');
+  $('intro-more').hidden = true;
   $('intro-edit').disabled = true;
   area.focus();
   area.setSelectionRange(0, 0);
@@ -200,7 +217,7 @@ function startIntroEdit() {
 async function saveIntro(content, button) {
   button.disabled = true;
   try {
-    const res = await call('writeIntro', { dir: current.id, content, expected: editingIntro });
+    const res = await call('writeDoc', { dir: current.id, id: 'intro', content, expected: editingIntro });
     if (!res.ok) {
       // 记下最新内容：用户再点保存就是有意覆盖
       const latest = await call('snapshot', { dir: current.id });
@@ -363,6 +380,248 @@ function renderTodos() {
     list(done, details);
     body.append(details);
   }
+}
+
+function renderCandidates() {
+  const { candidates } = snap;
+  $('candidates').hidden = !candidates.length;
+  $('candidate-count').textContent = String(candidates.length);
+  $('candidate-body').replaceChildren(...candidates.map((c) => {
+    const div = document.createElement('div');
+    div.className = 'note candidate';
+    const head = document.createElement('div');
+    head.className = 'note-head';
+    head.textContent = `${S.candidateKinds[c.kind]} · ${c.file} · ${ago(c.at)}`;
+    const body = document.createElement('div');
+    body.className = 'md';
+    body.innerHTML = markdown(c.text);
+    const evidence = document.createElement('div');
+    evidence.className = 'evidence';
+    evidence.textContent = fmt(S.candidateEvidence, { e: c.evidence });
+    const acts = document.createElement('div');
+    acts.className = 'candidate-acts';
+    acts.append(
+      todoButton(S.candidateReject, () => rejectCandidate(c)),
+      todoButton(S.edit, () => editCandidate(c)),
+      todoButton(S.candidateAccept, () => acceptCandidate(c), 'primary'),
+    );
+    div.append(head);
+    if (c.replaces) {
+      const old = document.createElement('div');
+      old.className = 'old';
+      old.textContent = fmt(S.candidateReplaces, { t: c.replaces });
+      div.append(old);
+    }
+    div.append(body, evidence, acts);
+    return div;
+  }));
+}
+
+// text 是用户改过的内容；不传就按候选原文写入。
+async function acceptCandidate(candidate, text) {
+  try {
+    const res = await call('acceptCandidate', { dir: current.id, id: candidate.id, text });
+    toast(res.ok ? fmt(S.candidateSaved, { f: `${snap.paths.knowledge}/${res.file}` }) : res.code === 'STALE' ? S.candidateStale : S.candidateChanged);
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+  await load();
+}
+
+async function rejectCandidate(candidate) {
+  try {
+    const res = await call('rejectCandidate', { dir: current.id, id: candidate.id });
+    if (!res.ok) toast(S.candidateChanged);
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+  await load();
+}
+
+function editCandidate(candidate) {
+  const area = document.createElement('textarea');
+  area.className = 'doc-edit';
+  area.value = candidate.text;
+  const accept = todoButton(S.candidateAccept, () => {
+    $('viewer').close();
+    acceptCandidate(candidate, area.value);
+  }, 'primary');
+  showViewer(`${snap.paths.knowledge}/${candidate.file}`, area, [todoButton(S.cancel, () => $('viewer').close()), accept]);
+  area.focus();
+}
+
+function renderLibrary() {
+  const { knowledge, notes } = snap;
+  document.querySelector('[data-ai="knowledge"]').textContent = knowledge.length ? S.update : S.create;
+  $('knowledge-count').textContent = knowledge.length ? String(knowledge.length) : '';
+  const list = $('knowledge-list');
+  list.replaceChildren();
+  if (!knowledge.length) list.innerHTML = `<li><p class="empty">${esc(S.knowledgeEmpty)}</p></li>`;
+  for (const file of knowledge) {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="name">${esc(file.name)}<small>${esc([file.title, bytes(file.size), ago(file.mtimeMs)].filter(Boolean).join(' · '))}</small></div>`;
+    const acts = document.createElement('span');
+    acts.className = 'acts';
+    acts.append(todoButton(S.remove, () => askConfirm(S.fileRemoveAsk, text(file.name), () => removeFile(file))));
+    li.append(acts, file.kind === 'other' ? todoButton(S.openFile, () => openFile(file.name)) : todoButton(S.view, () => viewFile(file)));
+    list.append(li);
+  }
+
+  $('note-count').textContent = notes.length ? String(notes.length) : '';
+  const body = $('note-body');
+  body.replaceChildren();
+  if (!notes.length) {
+    body.innerHTML = `<p class="empty">${esc(S.notesEmpty)}</p>`;
+    return;
+  }
+  const item = (note) => {
+    const div = document.createElement('div');
+    div.className = 'note';
+    const head = document.createElement('div');
+    head.className = 'note-head';
+    const at = document.createElement('span');
+    at.textContent = note.at;
+    const acts = document.createElement('span');
+    acts.className = 'acts';
+    acts.append(todoButton(S.remove, () => askConfirm(S.noteRemoveAsk, mdBody({ content: note.text }), () => removeNote(note))));
+    head.append(at, acts);
+    const text = document.createElement('div');
+    text.className = 'md';
+    text.innerHTML = markdown(note.text);
+    div.append(head, text);
+    return div;
+  };
+  body.append(...notes.slice(0, RECENT_NOTES).map(item));
+  const rest = notes.slice(RECENT_NOTES);
+  if (rest.length) {
+    const details = document.createElement('details');
+    details.className = 'done-list';
+    details.dataset.keep = 'library:more';
+    const summary = document.createElement('summary');
+    summary.textContent = fmt(S.moreNotes, { n: rest.length });
+    details.append(summary, ...rest.map(item));
+    body.append(details);
+  }
+}
+
+const bytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+function text(value) {
+  const p = document.createElement('p');
+  p.textContent = value;
+  return p;
+}
+
+// Markdown 在弹窗里渲染；图片、PDF、文本、音视频由工作进程在本机回环地址提供，用 iframe 显示。
+async function viewFile(file) {
+  const title = `${snap.paths.knowledge}/${file.name}`;
+  try {
+    if (file.kind === 'md') {
+      showViewer(title, mdBody(await call('readKnowledge', { dir: current.id, name: file.name })), [closeButton()]);
+      return;
+    }
+    const { url } = await call('fileUrl', { dir: current.id, name: file.name });
+    const frame = document.createElement('iframe');
+    frame.className = 'viewer-frame';
+    frame.title = file.name;
+    frame.src = url;
+    showViewer(title, frame, [todoButton(S.openFile, () => openFile(file.name)), closeButton()]);
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+}
+
+async function openFile(name) {
+  try {
+    await call('openFile', { dir: current.id, name });
+    toast(S.opened);
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+}
+
+async function removeFile(file) {
+  try {
+    await call('removeFile', { dir: current.id, name: file.name });
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+  await load();
+}
+
+function toBase64(buffer) {
+  const view = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < view.length; i += 0x8000) binary += String.fromCharCode(...view.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+// 逐个文件分块上传到 .cindy/project-knowledge/；一个失败就停下，已传完的保留。
+async function uploadFiles(files) {
+  const dir = current.id;
+  const tooLarge = files.filter((f) => f.size > MAX_UPLOAD).map((f) => f.name);
+  let done = 0;
+  $('file-upload').disabled = true;
+  try {
+    for (const file of files.filter((f) => f.size <= MAX_UPLOAD)) {
+      let uploadId = null;
+      try {
+        ({ uploadId } = await call('uploadBegin', { dir, name: file.name, size: file.size }));
+        for (let offset = 0; offset < file.size; offset += UPLOAD_CHUNK) {
+          toast(fmt(S.uploading, { f: file.name, p: Math.floor((offset * 100) / file.size) }));
+          const data = toBase64(await file.slice(offset, offset + UPLOAD_CHUNK).arrayBuffer());
+          await call('uploadChunk', { dir, uploadId, offset, data });
+        }
+        await call('uploadFinish', { dir, uploadId });
+        done += 1;
+      } catch (err) {
+        if (uploadId) call('uploadAbort', { dir, uploadId }).catch(() => {});
+        toast(fmt(S.failed, { m: `${file.name}: ${err.message}` }));
+        return;
+      }
+    }
+    toast([done ? fmt(S.uploaded, { n: done }) : '', tooLarge.length ? fmt(S.uploadTooLarge, { f: tooLarge.join(S.joiner) }) : ''].filter(Boolean).join(' '));
+  } finally {
+    $('file-upload').disabled = false;
+    if (done && view === 'project' && current?.id === dir) await load();
+  }
+}
+
+async function addNote(event) {
+  event.preventDefault();
+  const input = $('note-new');
+  const text = input.value.trim();
+  if (!text || !current) return;
+  input.disabled = true;
+  try {
+    await call('addNote', { dir: current.id, text });
+    input.value = '';
+    await load();
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+// 删除前让用户看一眼要删的内容再确认；资料可能很长，误删不像待办那样一眼能发现。
+function askConfirm(title, body, onOk) {
+  $('confirm-title').textContent = title;
+  $('confirm-body').replaceChildren(body);
+  const dialog = $('confirm');
+  dialog.returnValue = '';
+  dialog.addEventListener('close', () => { if (dialog.returnValue === 'ok') onOk(); }, { once: true });
+  dialog.showModal();
+}
+
+async function removeNote(note) {
+  try {
+    const res = await call('removeNote', { dir: current.id, id: note.id });
+    if (!res.ok) toast(S.noteChanged);
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+  await load();
 }
 
 function renderFiles() {
@@ -537,6 +796,8 @@ function render() {
     renderTasks();
     renderIntro();
     renderTodos();
+    renderCandidates();
+    renderLibrary();
     renderFiles();
     renderGit();
   });
@@ -561,6 +822,10 @@ async function load() {
   snap = snapshot.value;
   notice('');
   render();
+  // 当前项目的待办数和改动数直接用刚读到的资料，不再跑一遍 git
+  const open = snap.todos.filter((t) => !t.done).length;
+  stats.set(dir, { tasks: Array.isArray(taskList) ? taskList : null, summary: { openTodos: open, candidates: snap.candidates.length, git: snap.git && { branch: snap.git.branch, changedFiles: snap.git.changedFiles } } });
+  loadStats(false).catch(() => {});
 }
 
 // 只重读任务（任务事件触发时用）；资料和 Git 不动，省掉 Node 进程读文件和跑 git。
@@ -574,6 +839,7 @@ async function loadTasks() {
   } catch (err) {
     next = { error: err.code || err.message };
   }
+  loadStats(false).catch(() => {});
   if (view !== 'project' || current?.id !== dir) return;
   taskList = next;
   withKept(() => {
@@ -623,11 +889,59 @@ async function addTodo(event) {
   }
 }
 
+// 查看弹窗：body 是要显示的节点，acts 是底部按钮。
+function showViewer(title, body, acts) {
+  $('viewer-title').textContent = title;
+  $('viewer-body').replaceChildren(body);
+  $('viewer-actions').replaceChildren(...acts);
+  if (!$('viewer').open) $('viewer').showModal();
+}
+function closeButton() {
+  const b = document.createElement('button');
+  b.value = 'close';
+  b.className = 'ghost';
+  b.textContent = S.close;
+  return b;
+}
+function mdBody(doc) {
+  const div = document.createElement('div');
+  div.className = 'md scroll';
+  div.innerHTML = markdown(doc.content) + (doc.truncated ? `<p class="empty">${esc(S.truncated)}</p>` : '');
+  return div;
+}
+
+// README、AGENTS.md、CLAUDE.md：查看时可以切到编辑。超过 100 KB 只读到一部分，不让编辑，免得保存时截断。
 function openViewer(id) {
   const doc = snap.docs[id];
-  $('viewer-title').textContent = snap.paths[id];
-  $('viewer-body').innerHTML = markdown(doc.content) + (doc.truncated ? `<p class="empty">${esc(S.truncated)}</p>` : '');
-  $('viewer').showModal();
+  showViewer(snap.paths[id], mdBody(doc), [...(doc.truncated ? [] : [todoButton(S.edit, () => editDoc(id, doc.content))]), closeButton()]);
+}
+
+function editDoc(id, content) {
+  let expected = content; // 打开编辑时读到的内容；文件被别处改过时换成最新内容，再点保存就是有意覆盖
+  const area = document.createElement('textarea');
+  area.className = 'doc-edit';
+  area.value = content;
+  const save = todoButton(S.save, async () => {
+    save.disabled = true;
+    try {
+      const res = await call('writeDoc', { dir: current.id, id, content: area.value, expected });
+      if (!res.ok) {
+        expected = (await call('snapshot', { dir: current.id })).docs[id]?.content ?? '';
+        toast(S.docChanged);
+        return;
+      }
+      toast(fmt(S.docSaved, { f: snap.paths[id] }));
+      $('viewer').close();
+      await load();
+    } catch (err) {
+      toast(fmt(S.failed, { m: err.message }));
+    } finally {
+      save.disabled = false;
+    }
+  }, 'primary');
+  showViewer(snap.paths[id], area, [todoButton(S.cancel, () => openViewer(id)), save]);
+  area.focus();
+  area.setSelectionRange(0, 0);
 }
 
 function openAsk(next) {
@@ -636,7 +950,7 @@ function openAsk(next) {
   $('ask-text').value = next.text;
   $('ask').showModal();
 }
-const openAiAsk = (kind) => openAsk({ heading: S.titles[kind], title: S.titles[kind], text: S.prompts[kind] });
+const openAiAsk = (kind) => openAsk({ heading: S.titles[kind], title: S.titles[kind], text: fmt(S.prompts[kind], { dir: current.id }) });
 
 $('ask').addEventListener('close', async () => {
   if ($('ask').returnValue !== 'send' || !ask || !current) return;
@@ -666,30 +980,83 @@ const ATTENTION = new Set(['awaiting', 'error']);
 async function loadOverview() {
   $('board').hidden = true;
   $('path').hidden = true;
-  const rows = await Promise.all(projects.map(async (p) => {
-    const [tasks, summary] = await Promise.allSettled([call('tasks', { dir: p.id }), call('summary', { dir: p.id })]);
-    return { project: p, tasks: tasks.status === 'fulfilled' ? tasks.value : null, summary: summary.status === 'fulfilled' ? summary.value : null };
-  }));
+  await loadStats(true);
   if (view !== 'all') return;
   notice('');
-  withKept(() => renderOverview(rows));
+  withKept(() => renderOverview(projects.map((p) => ({ project: p, ...stats.get(p.id) }))));
+}
+
+// 读各项目的任务；full 时再读待办数和 Git 摘要（每个项目都要跑 git，只在整体刷新时读），否则沿用上次的。
+async function loadStats(full) {
+  await Promise.all(projects.map(async (p) => {
+    const prev = stats.get(p.id);
+    const [tasks, summary] = await Promise.allSettled([
+      call('tasks', { dir: p.id }),
+      full || !prev?.summary ? call('summary', { dir: p.id }) : prev.summary,
+    ]);
+    stats.set(p.id, { tasks: tasks.status === 'fulfilled' ? tasks.value : null, summary: summary.status === 'fulfilled' ? summary.value : null });
+  }));
+  renderRail();
+}
+
+function taskCounts(tasks) {
+  const active = (tasks || []).filter((t) => !t.archived);
+  return {
+    attention: active.filter((t) => ATTENTION.has(t.status)).length,
+    running: active.filter((t) => t.status === 'running').length,
+    done: active.filter((t) => t.status === 'done').length,
+    last: Math.max(0, ...(tasks || []).map((t) => t.lastActivityAt)),
+  };
+}
+
+function renderRail() {
+  document.body.classList.toggle('has-rail', projects.length > 1);
+  if (projects.length < 2) return;
+  const item = (id, label, badges) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const active = id === ALL ? view === 'all' : view === 'project' && current?.id === id;
+    b.className = `rail-item${active ? ' active' : ''}`;
+    if (active) b.setAttribute('aria-current', 'page');
+    const name = document.createElement('span');
+    name.className = 'rn';
+    name.textContent = label;
+    const line = document.createElement('span');
+    line.className = 'rail-badges';
+    line.append(...badges);
+    b.title = label;
+    b.append(name, line);
+    b.addEventListener('click', () => switchTo(id));
+    return b;
+  };
+  const badge = (cls, text) => {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text;
+    return span;
+  };
+  $('rail').replaceChildren(item(ALL, S.allProjects, []), ...projects.map((p) => {
+    const { tasks, summary } = stats.get(p.id) || {};
+    const c = tasks ? taskCounts(tasks) : null;
+    const badges = [];
+    if (c?.attention) badges.push(badge('dot attention', `${c.attention} ${S.columns.attention}`));
+    if (c?.running) badges.push(badge('dot running', `${c.running} ${S.columns.running}`));
+    if (c?.done) badges.push(badge('dot done', `${c.done} ${S.columns.done}`));
+    // 没有进行中的任务（或宿主不提供任务）时，用待办数说明这个项目还有事
+    if (!badges.length && summary?.openTodos) {
+      badges.push(badge('', fmt(S.overview.todos, { n: summary.openTodos })));
+    }
+    return item(p.id, p.label, badges);
+  }));
 }
 
 function renderOverview(rows) {
   const box = $('overview');
   box.hidden = false;
-  const stats = rows.map((row) => {
-    const active = (row.tasks || []).filter((t) => !t.archived);
-    return {
-      ...row,
-      attention: active.filter((t) => ATTENTION.has(t.status)).length,
-      running: active.filter((t) => t.status === 'running').length,
-      last: Math.max(0, ...(row.tasks || []).map((t) => t.lastActivityAt)),
-    };
-  });
+  const cards = rows.map((row) => ({ ...row, ...taskCounts(row.tasks) }));
   // 等你处理的排最前，其次是正在跑的，再按最近活动排。
-  stats.sort((a, b) => b.attention - a.attention || b.running - a.running || b.last - a.last);
-  box.replaceChildren(...stats.map(projectCard));
+  cards.sort((a, b) => b.attention - a.attention || b.running - a.running || b.last - a.last);
+  box.replaceChildren(...cards.map(projectCard));
 }
 
 function projectCard(row) {
@@ -716,7 +1083,9 @@ function projectCard(row) {
   if (!row.tasks && !row.summary) badge(S.overview.failed, 'muted');
   if (row.attention) badge(fmt(S.overview.attention, { n: row.attention }), 'attention');
   if (row.running) badge(fmt(S.overview.running, { n: row.running }), 'running');
-  if (row.tasks && !row.attention && !row.running) badge(S.overview.quiet, 'muted');
+  if (row.done) badge(fmt(S.overview.done, { n: row.done }), 'done');
+  if (row.tasks && !row.attention && !row.running && !row.done) badge(S.overview.quiet, 'muted');
+  if (row.summary?.candidates) badge(fmt(S.overview.candidates, { n: row.summary.candidates }), 'todos');
   if (row.summary) badge(row.summary.openTodos ? fmt(S.overview.todos, { n: row.summary.openTodos }) : S.overview.noTodos, row.summary.openTodos ? 'todos' : 'muted');
 
   const meta = document.createElement('small');
@@ -738,6 +1107,7 @@ function switchTo(id) {
   $('project').value = id;
   kept.clear();
   editingIntro = null;
+  introOpen = false;
   selected = null;
   if (id === ALL) view = 'all';
   else {
@@ -746,6 +1116,8 @@ function switchTo(id) {
     current = projects.find((p) => p.id === id);
   }
   remember(id);
+  $('title').textContent = view === 'all' ? S.allProjects : current.label;
+  renderRail();
   load();
 }
 
@@ -783,9 +1155,21 @@ async function init() {
   document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = S[el.dataset.t]; });
   $('refresh').textContent = S.refresh;
   document.querySelector('[data-ai="todos"]').textContent = S.organize;
+  document.querySelector('[data-ai="extract"]').textContent = S.extract;
   document.querySelectorAll('[data-ai]').forEach((el) => el.addEventListener('click', () => openAiAsk(el.dataset.ai)));
   $('todo-new').placeholder = S.todoNew;
   $('todo-add').addEventListener('submit', addTodo);
+  $('note-new').placeholder = S.noteNew;
+  $('note-add').addEventListener('submit', addNote);
+  $('intro-more').addEventListener('click', () => { introOpen = !introOpen; fitIntro(); });
+  // 关掉弹窗时清空内容，停止 iframe 里还在播放的音视频。
+  $('viewer').addEventListener('close', () => $('viewer-body').replaceChildren());
+  $('file-upload').addEventListener('click', () => $('file-input').click());
+  $('file-input').addEventListener('change', () => {
+    const files = [...$('file-input').files];
+    $('file-input').value = '';
+    if (files.length && current) uploadFiles(files);
+  });
   $('intro-edit').addEventListener('click', startIntroEdit);
   $('todo-select').addEventListener('click', toggleSelecting);
   $('todo-select-task').addEventListener('click', askForSelected);
@@ -815,7 +1199,10 @@ async function init() {
   let tick = 0;
   setInterval(() => {
     tick += 1;
-    if (idle()) (tick % 2 === 0 ? load() : loadTasks()).catch(() => {});
+    if (!idle()) return;
+    (tick % 2 === 0 ? load() : loadTasks()).catch(() => {});
+    // 项目栏里其他项目的待办数和改动数也每 60 秒重读一次
+    if (tick % 2 === 0 && view === 'project') loadStats(true).catch(() => {});
   }, 30000);
 }
 
