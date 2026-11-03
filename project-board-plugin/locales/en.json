@@ -1,7 +1,7 @@
 {
   "name": "Project Board",
   "description": "See each project's tasks by status, introduction, to-dos, AGENTS.md and other docs plus Git status in one page, plus an overview of all projects. Docs live in the project's .cindy folder, are committed with git, and can be edited directly or generated and updated by AI.",
-  "whenToUse": "When the user wants an overview of a project or all projects: its tasks and their status, introduction, to-do list, AGENTS.md / CLAUDE.md, project knowledge, or Git status.",
+  "whenToUse": "When the user wants an overview of one or all projects (tasks, intro, to-dos, AGENTS.md / CLAUDE.md, knowledge, Git status), asks to save a to-do, idea or note to a project or the inbox, including from chat channels such as WeChat, or asks to propose lasting project knowledge for review.",
   "mainView": {
     "title": "Project Board"
   }

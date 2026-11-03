@@ -4,8 +4,8 @@
   "id": "project-board",
   "name": "Project Board",
   "description": "See each project's tasks by status, introduction, to-dos, AGENTS.md and other docs plus Git status in one page, plus an overview of all projects. Docs live in the project's .cindy folder, are committed with git, and can be edited directly or generated and updated by AI.",
-  "whenToUse": "When the user wants an overview of a project or all projects: its tasks and their status, introduction, to-do list, AGENTS.md / CLAUDE.md, project knowledge, or Git status.",
-  "version": "0.4.0",
+  "whenToUse": "When the user wants an overview of one or all projects (tasks, intro, to-dos, AGENTS.md / CLAUDE.md, knowledge, Git status), asks to save a to-do, idea or note to a project or the inbox, including from chat channels such as WeChat, or asks to propose lasting project knowledge for review.",
+  "version": "0.6.0",
   "entry": "main.js",
   "icon": "assets/icon.png",
   "locales": {
@@ -13,6 +13,84 @@
     "zh-CN": "locales/zh-CN.json",
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
+  },
+  "tools": [
+    {
+      "name": "list_projects",
+      "description": "List the projects registered in Cindy. Reads each project's .cindy/project.md and changes nothing. Returns {projects:[{id, name, intro}]}, where id is the value to pass as project and intro is the opening of the project introduction (null if there is none).",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "add_todo",
+      "description": "Append an open to-do to the project's .cindy/todos.md, creating the file if needed. Does not run git. Returns {project, item}; keep item to undo or move it with remove_item.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project id from list_projects." },
+          "text": { "type": "string", "description": "The to-do in one line, 1-500 characters. Keep the user's own wording; do not expand it." }
+        },
+        "required": ["project", "text"]
+      }
+    },
+    {
+      "name": "add_note",
+      "description": "Append a dated note to the project's .cindy/project-knowledge/notes.md, creating the file if needed. Does not run git. Returns {project, item}; keep item to undo or move it with remove_item.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project id from list_projects." },
+          "text": { "type": "string", "description": "The idea or material, 1-10000 characters, line breaks kept. Keep the user's own wording; do not expand it." }
+        },
+        "required": ["project", "text"]
+      }
+    },
+    {
+      "name": "remove_item",
+      "description": "Delete one to-do line from .cindy/todos.md or one note from .cindy/project-knowledge/notes.md. Use only when the user asks to undo or move that item. Returns {project, removed:true}; fails with ITEM_NOT_FOUND and changes nothing if the item is gone or ambiguous.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project id from list_projects." },
+          "item": {
+            "type": "object",
+            "description": "The item returned by add_todo or add_note. For an older to-do, pass {kind:\"todo\", text} with its exact text.",
+            "properties": {
+              "kind": { "type": "string", "enum": ["todo", "note"] },
+              "line": { "type": "integer" },
+              "text": { "type": "string" },
+              "id": { "type": "string" }
+            },
+            "required": ["kind"]
+          }
+        },
+        "required": ["project", "item"]
+      }
+    },
+    {
+      "name": "propose_knowledge",
+      "description": "Propose one piece of lasting project knowledge for the user to review on the board. It is held as a pending candidate and reaches .cindy/project-knowledge/ only after the user accepts it, so do not also edit that folder. Only propose what stays true across future work and has been checked against current code, config or tests; never one-off implementation details, guesses, secrets or personal data. Does not run git. Returns {project, id}. Fails with the reason if a field is invalid.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": { "type": "string", "description": "Project id from list_projects." },
+          "kind": { "type": "string", "enum": ["term", "architecture", "correction"], "description": "term: a stable business term. architecture: lasting architecture or system knowledge. correction: fixes existing knowledge that code or tests prove is out of date." },
+          "file": { "type": "string", "description": "Markdown file name directly inside .cindy/project-knowledge/, such as architecture.md. Prefer an existing file. No spaces or brackets; not notes.md or TOC.md." },
+          "text": { "type": "string", "description": "The Markdown to add, 1-10000 characters. For a correction, the text that replaces the old passage." },
+          "replaces": { "type": "string", "description": "Required for correction and not allowed otherwise: the exact old passage, which must appear exactly once in file." },
+          "evidence": { "type": "string", "description": "What proves it, 1-500 characters, such as a file, test or commit." }
+        },
+        "required": ["project", "kind", "file", "text", "evidence"]
+      }
+    }
+  ],
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/capture",
+        "name": "capture",
+        "description": "How to handle chat messages: when to just reply, when to save, which project they go to, and how to undo."
+      }
+    ]
   },
   "mainView": {
     "title": "Project Board",
@@ -24,12 +102,17 @@
     "targets": true,
     "observe": true
   },
+  "sidebarWidget": true,
+  "launch": "resident",
   "subscribe": {
     "topics": [
       "turn",
       "session",
       "activity"
     ]
+  },
+  "preview": {
+    "hosts": ["127.0.0.1"]
   },
   "node": {
     "entry": "node/worker.cjs",

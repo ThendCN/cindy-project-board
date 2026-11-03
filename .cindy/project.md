@@ -10,13 +10,19 @@
 
 ## 主要功能
 
-- **全部项目总览**：多个项目时默认打开总览，每个项目一张卡片（待处理与运行中的任务数、未完成待办数、分支与未提交改动、最近活动），等你处理的排在最前，点卡片进入该项目。
+- **左侧项目栏**：项目多于一个、窗口宽于 900px 时常驻左侧，点一下就切换；每个项目显示待处理（红）、运行中（蓝）、刚完成（绿，即侧边栏还没看过的绿点任务）的任务数，没有任务状态时显示未完成待办数。窄窗口收回成顶部下拉框。
+- **全部项目总览**：多个项目时默认打开总览，每个项目一张卡片（待处理与运行中的任务数、未完成待办数、分支与未提交改动、最近活动），等你处理的排在最前，点卡片进入该项目。，卡片上也显示刚完成的任务数
 - **任务**：按状态分栏显示项目内的 Cindy 任务（待处理 / 运行中 / 刚完成 / 其他），已归档的折叠显示，点击可打开任务。订阅任务事件（只有元数据，不含内容），状态变化即时刷新。
+- **侧栏状态条**：在 Cindy 侧边栏「全部任务」下显示跨项目的运行中、刚完成、待确认、出错任务数，点开列出任务（宿主绘制，需要 Cindy 支持 `sidebarWidget`，目前只在本地原型分支 `feat/plugin-sidebar-widget` 上）。常驻运行，任务事件到达后约 1 秒更新；只统计本机已登记项目，不含对话、伙伴和远程任务。
 - **待办**：读写 `.cindy/todos.md` 的勾选清单；支持勾选、改文字、删除、新增，可多选待办后一键新建任务交给 AI 完成。派出去的待办旁显示对应任务的状态，点击打开任务；对应关系只存在本机，不写进 `todos.md`。
-- **项目介绍**：显示并可编辑 `.cindy/project.md`；保存前核对文件是否被别处改过，避免覆盖。
-- **项目文件**：查看 README、AGENTS.md、CLAUDE.md、项目知识库（`.cindy/project-knowledge/TOC.md`），可让 AI 创建或维护；一键在 AGENTS.md 加入「项目资料」入口，并让 CLAUDE.md 通过 `@AGENTS.md` 导入。
+- **项目介绍**：在左栏待办下方，默认只露出开头，可展开全文；显示并可编辑 `.cindy/project.md`，保存前核对文件是否被别处改过，避免覆盖。
+- **资料库**：放在右栏顶部，下方是 Git。「文档与文件」列出 `.cindy/project-knowledge/` 下的全部文件（TOC.md 排最前，Markdown 显示标题），可上传文件（单个不超过 50 MB，分块经 Node 进程写入，同名自动加序号）、删除（先确认）。Markdown 在弹窗里渲染；图片、PDF、文本、音视频由 Node 进程在 `127.0.0.1` 随机端口提供、用随机令牌限定文件，页面以 iframe 预览（除 PDF 外都加 CSP 沙箱）；docx、xlsx 等页面里预览不了的用电脑上的默认应用打开。可让 AI 整理维护。「收集的资料」（`notes.md`）按条显示最新 3 条、其余折叠，可在卡片里直接记一条或删一条（先确认），和伙伴从聊天记进来的走同一个文件。
+- **知识候选**：资料库的「提取知识」新建一个任务，让 AI 核对最近的提交和改动，经 `propose_knowledge` 工具提交值得长期保留的知识（术语、架构、对旧知识的修正，每条带依据）；在别的任务里直接要求提交也走这个工具。候选存在 `.cindy/.knowledge-candidates/`，目录自带 `.gitignore`，不随 git 提交。用户在资料库逐条确认、修改后确认或忽略；确认后才写进 `.cindy/project-knowledge/` 并列入 `TOC.md`（Cindy 只把 TOC.md 的入口告诉新任务，不在索引里基本读不到；没有 TOC.md 时会新建）。修正类要求原文在文件里恰好出现一次，提交后原文变了就不写入。总览卡片显示待确认条数。不会自动提取：每次都消耗模型额度，由用户点按钮发起。用 project-context 生成 TOC.md 的项目，重新生成时会冲掉看板补的索引行。
+- **配置文件**：折叠在资料库底部，查看并可直接编辑 README、AGENTS.md、CLAUDE.md（保存前核对是否被别处改过；软链接写到真实文件；超过 100 KB 只读），也可让 AI 创建或维护；一键在 AGENTS.md 加入「项目资料」入口，并让 CLAUDE.md 通过 `@AGENTS.md` 导入。
 - **Git**：当前分支、未提交改动数、最近 5 次提交、其他 worktree，并提示 `.cindy-worktrees/` 未被忽略的风险。
+- **从聊天记录**：伙伴（包括绑定微信的伙伴）可经插件工具把待办写入 `.cindy/todos.md`，把灵感和资料写入 `.cindy/project-knowledge/notes.md`，并能撤销或移动。默认只聊天，明确要求才记，拿不准先回复再问；项目不明确就放进名为「收集箱」的项目。规则写在 `manual/capture/MANUAL.md`。写入不会提交 git。
 - 界面支持简体中文、繁体中文、英文、日文、韩文、西班牙文、法文、德文、葡萄牙文（巴西、葡萄牙），跟随 Cindy 语言；文言文界面回退到简体 / 繁体中文。插件名称与简介受宿主限制只有中、英、日、韩四种。
+- 任务数据来自 `cindy.observe.projectTasks`，Cindy 0.1.121 还没有这个接口（只在 main 分支上）：这时任务区提示版本不支持，项目栏和总览只显示待办数与 Git 状态，更新 Cindy 后自动显示任务。
 - 自动刷新：任务事件到达时立即刷新任务；兜底每 30 秒重读任务、每 60 秒重读全部资料。刷新时保留折叠区展开状态和滚动位置。
 
 ## 技术栈
@@ -24,7 +30,7 @@
 - Cindy 插件（`ghost.json` schemaVersion 3，最低 Cindy 0.1.121）
 - 原生 HTML / CSS / JavaScript，无框架、无构建步骤、无第三方依赖
 - Node.js 工作进程（CommonJS，JSON-RPC over stdio，按需启动、空闲 120 秒退出），只用 Node 内置模块和本机 `git`
-- 宿主能力：`cindy.targets`（项目列表、新建任务）、`cindy.observe`（只读任务列表）、`cindy.node`、`subscribe`（任务事件：turn / session / activity）
+- 宿主能力：`cindy.targets`（项目列表、新建任务）、`cindy.observe`（只读任务列表）、`cindy.node`、`subscribe`（任务事件：turn / session / activity）；`preview.hosts` 声明 `127.0.0.1`，宿主才允许主视图用 iframe 嵌入 Node 进程在本机提供的预览页（Cindy 0.1.121 的回环嵌入）
 
 ## 目录结构
 
@@ -36,23 +42,25 @@ project-board-plugin/
 ├── main-view.js        # 主视图逻辑：渲染各卡片与项目总览、Markdown、自动刷新、发请求
 ├── main-view-i18n.js   # 主视图界面文案（10 种语言）
 ├── main-view.css       # 主视图样式（适配亮/暗色主题）
-├── node/worker.cjs     # Node 工作进程：读资料、Git 状态与总览摘要，原子写入 .cindy/*.md、AGENTS.md、CLAUDE.md
+├── node/worker.cjs     # Node 工作进程：读资料、资料库文件清单、Git 状态与总览摘要，原子写入 .cindy/ 下的资料、AGENTS.md、CLAUDE.md；接收分块上传；保存与确认知识候选；在本机回环地址提供文件预览
+├── manual/capture/     # 插件手册：伙伴从聊天记待办和资料的规则
 ├── locales/            # 插件名称、描述的多语言（en、zh-CN、ja、ko）
 └── assets/icon.png     # 插件图标
 tests/
-└── worker.test.cjs     # Node 工作进程测试（node --test）
+├── worker.test.cjs     # Node 工作进程测试（node --test）
+└── tools.test.cjs      # 插件工具测试：假宿主运行 main.js，连真实工作进程
 ```
 
-数据流：主视图 ⇄（BroadcastChannel，按 reqId 去重重发）⇄ `main.js` → 宿主 API 或 `node/worker.cjs`。项目目录只接受 Cindy 已登记的项目，写操作在 Node 进程里串行执行。
+数据流：主视图 ⇄（BroadcastChannel，按 reqId 去重重发）⇄ `main.js` → 宿主 API 或 `node/worker.cjs`；Agent 经 `ghost_call` 调工具也走 `main.js`，写入后通知主视图刷新。项目目录只接受 Cindy 已登记的项目，写操作在 Node 进程里串行执行。插件收不到消息发送者的身份，「只有主人能写入」目前靠手册约束。
 
 ## 如何运行和测试
 
 - **运行**：在 Cindy 里用插件开发工具（`ghost_forge_pack` / `ghost_forge_install`）打包并安装 `project-board-plugin/`，然后在 Cindy 中打开「项目看板」主视图。打包产物 `*.cindy` 已被 git 忽略。
 - **权限**：首次使用需在 Cindy 的插件详情页允许查看任务、新建任务。
-- **测试**：`tests/worker.test.cjs` 像 Cindy 一样启动 Node 工作进程、经 stdio 发 JSON-RPC 请求，在临时目录里检查待办勾选、改写、新增、删除、项目介绍保存、资料入口写入和总览摘要（含 AI 同时改文件、CRLF 换行、并发写入、软链接等情况）。只用 Node 内置模块，无需安装依赖：
+- **测试**：`tests/worker.test.cjs` 像 Cindy 一样启动 Node 工作进程、经 stdio 发 JSON-RPC 请求，在临时目录里检查待办勾选、改写、新增、删除、收集资料的写入、解析与撤销、资料库文件清单、上传、删除、预览地址、配置文件保存、项目介绍保存、资料入口写入和总览摘要（含 AI 同时改文件、CRLF 换行、并发写入、软链接等情况），以及知识候选的提交、确认、修正、忽略和拒绝不合规内容。`tests/tools.test.cjs` 在假宿主里运行 `main.js`，检查工具调用、拒绝未登记项目和错误回传。只用 Node 内置模块，无需安装依赖：
 
   ```sh
-  node --test tests/worker.test.cjs
+  node --test tests/*.test.cjs
   ```
 
   主视图另做语法检查：
@@ -63,3 +71,6 @@ tests/
   ```
 
   界面功能（总览、任务状态、刷新、多语言）靠在 Cindy 里手动验证。
+
+- **实测伙伴**：测试消息只写要做的事，不要让伙伴说明自己怎么判断、调用了什么（这类要求曾被模型安全检查以 `reasoning_extraction` 拦下）。工具调用和是否弹确认从聊天记录核对，结果看写入的文件。
+- **伙伴用插件的前提**：宿主不给伙伴注入插件花名册，`whenToUse` 到不了伙伴；宿主还预置了伙伴自己的待办工具，所以「加个待办」默认记到伙伴清单。要让伙伴写进看板，得在伙伴记忆里写明这条规则（宿主允许伙伴的记忆和个人 Skill 细化什么算自己的待办）。
