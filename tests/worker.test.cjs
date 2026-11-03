@@ -115,6 +115,47 @@ test('新增待办：文件不存在时创建；文件末尾没有换行时先�
   assert.match(res.error.message, /1-500/);
 });
 
+test('新增待办放在第一个分组之前，不落进任何分组，并交回它的行号', async () => {
+  const dir = await project({ '.cindy/todos.md': TODOS });
+  const first = await call('project/add-todo', { dir, text: '新的一条' });
+  assert.deepEqual(first.item, { line: 2, text: '新的一条' });
+  assert.deepEqual(first.todos[0], { line: 2, text: '新的一条', done: false, group: '' });
+  assert.equal(await read(dir, '.cindy/todos.md'), TODOS.replace('## 登录页', '- [ ] 新的一条\n\n## 登录页'));
+
+  const second = await call('project/add-todo', { dir, text: '再来一条' });
+  assert.deepEqual(second.item, { line: 3, text: '再来一条' });
+  assert.equal(await read(dir, '.cindy/todos.md'), TODOS.replace('## 登录页', '- [ ] 新的一条\n- [ ] 再来一条\n\n## 登录页'));
+  assert.equal(second.todos.find((t) => t.text === '补截图').group, '工程');
+});
+
+test('新增待办：文件以分组开头、标题后没有空行、CRLF 换行时位置都正确', async () => {
+  const noTitle = await project({ '.cindy/todos.md': '## 工程\n- [ ] 已有\n' });
+  assert.equal((await call('project/add-todo', { dir: noTitle, text: '新的' })).item.line, 0);
+  assert.equal(await read(noTitle, '.cindy/todos.md'), '- [ ] 新的\n\n## 工程\n- [ ] 已有\n');
+
+  const tight = await project({ '.cindy/todos.md': '# 待办\n## 工程\n' });
+  assert.equal((await call('project/add-todo', { dir: tight, text: '新的' })).item.line, 2);
+  assert.equal(await read(tight, '.cindy/todos.md'), '# 待办\n\n- [ ] 新的\n\n## 工程\n');
+
+  const crlf = TODOS.replace(/\n/g, '\r\n');
+  const windows = await project({ '.cindy/todos.md': crlf });
+  await call('project/add-todo', { dir: windows, text: '新的' });
+  assert.equal(await read(windows, '.cindy/todos.md'), crlf.replace('## 登录页', '- [ ] 新的\r\n\r\n## 登录页'));
+});
+
+test('文件开头的一级标题是文档标题，不算分组；后面的一级标题仍算', async () => {
+  const dir = await project({ '.cindy/todos.md': '\n# 待办\n- [ ] 甲\n# 工程\n- [ ] 乙\n' });
+  const { todos } = await call('project/snapshot', { dir });
+  assert.deepEqual(todos.map((t) => t.group), ['', '工程']);
+});
+
+test('删除待办后两边都是空行时只留一个空行', async () => {
+  const dir = await project({ '.cindy/todos.md': TODOS });
+  const { item } = await call('project/add-todo', { dir, text: '新的' });
+  await call('project/update-todo', { dir, ...item, change: { remove: true } });
+  assert.equal(await read(dir, '.cindy/todos.md'), TODOS);
+});
+
 test('保存项目介绍前核对文件是否被别处改过，改过就不覆盖', async () => {
   const dir = await project({ '.cindy/project.md': '旧介绍' });
   assert.deepEqual(await call('project/write-doc', { dir, id: 'intro', content: '我的版本', expected: '我打开时看到的' }), { ok: false, code: 'CHANGED' });

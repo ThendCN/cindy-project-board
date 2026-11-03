@@ -162,9 +162,8 @@ const TOOLS = {
     return { projects: list };
   },
   async add_todo({ project, text }) {
-    const { todos } = await write('project/add-todo', project, { text });
-    const { line, text: saved } = todos.at(-1);
-    return { project, item: { kind: 'todo', line, text: saved } };
+    const { item } = await write('project/add-todo', project, { text });
+    return { project, item: { kind: 'todo', ...item } };
   },
   async add_note({ project, text }) {
     const { id } = await write('project/add-note', project, { text });

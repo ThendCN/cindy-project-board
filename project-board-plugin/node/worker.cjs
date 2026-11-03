@@ -76,14 +76,19 @@ async function readDoc(dir, rel) {
   }
 }
 
+/** 文件开头的一级标题是文档标题，不是分组。 */
+function isDocTitle(lines, index) {
+  return /^#\s/.test(lines[index]) && lines.slice(0, index).every((line) => !line.trim());
+}
+
 /** 勾选清单条目带行号；行号用于勾选时定位，改写前会重新核对。 */
 function parseTodos(markdown) {
   const items = [];
   let group = '';
-  markdown.split(/\r?\n/).forEach((line, index) => {
+  markdown.split(/\r?\n/).forEach((line, index, lines) => {
     const heading = HEADING.exec(line);
     if (heading) {
-      group = heading[1];
+      group = isDocTitle(lines, index) ? '' : heading[1];
       return;
     }
     const todo = TODO_LINE.exec(line);
@@ -415,6 +420,8 @@ async function updateTodo({ dir, line, text, change }) {
     // 连同这一行的换行符一起删；最后一行没有换行符时删掉前一个换行符。
     if (target * 2 + 1 < parts.length) parts.splice(target * 2, 2);
     else parts.splice(Math.max(target * 2 - 1, 0), 2);
+    // 两边都是空行时只留一个。
+    if (target > 0 && lines[target - 1].trim() === '' && lines[target + 1]?.trim() === '') parts.splice(target * 2, 2);
   } else {
     const nextText = change?.text === undefined ? null : todoText(change.text);
     parts[target * 2] = lines[target].replace(TODO_LINE, (_, a, mark, b, rest) =>
@@ -425,15 +432,38 @@ async function updateTodo({ dir, line, text, change }) {
   return { ok: true, todos: parseTodos(content) };
 }
 
-/** 在待办文件末尾追加一条未完成待办；文件不存在时创建。 */
+/**
+ * 新增一条未完成待办；文件不存在时创建。
+ * 有分组时放在第一个分组之前：不知道它属于哪组，就不落进任何一组。没有分组时追加到末尾。
+ */
 async function addTodo({ dir, text }) {
   const file = path.join(dir, DOCS.todos);
   const content = await readOrEmpty(file);
   const eol = /\r\n/.test(content) ? '\r\n' : '\n';
-  const prefix = content === '' || content.endsWith('\n') ? content : content + eol;
-  const next = `${prefix}- [ ] ${todoText(text)}${eol}`;
+  const saved = todoText(text);
+  const row = `- [ ] ${saved}`;
+  // 同 updateTodo：保留每行原有的换行符。
+  const parts = content.split(/(\r?\n)/);
+  const lines = parts.filter((_, i) => i % 2 === 0);
+  const firstGroup = lines.findIndex((line, i) => HEADING.test(line) && !isDocTitle(lines, i));
+  let next;
+  let line;
+  if (firstGroup < 0) {
+    const prefix = content === '' || content.endsWith('\n') ? content : content + eol;
+    next = `${prefix}${row}${eol}`;
+    line = prefix.split('\n').length - 1;
+  } else {
+    // 接在分组前最后一个非空行之后；和上面的标题或文字、下面的分组各隔一个空行。
+    let at = firstGroup;
+    while (at > 0 && !lines[at - 1].trim()) at--;
+    const above = at > 0 && !TODO_LINE.test(lines[at - 1]) ? [''] : [];
+    const below = at === firstGroup ? [''] : [];
+    parts.splice(at * 2, 0, ...[...above, row, ...below].flatMap((l) => [l, eol]));
+    next = parts.join('');
+    line = at + above.length;
+  }
   await writeAtomic(file, next);
-  return { ok: true, todos: parseTodos(next) };
+  return { ok: true, todos: parseTodos(next), item: { line, text: saved } };
 }
 
 /**
