@@ -22,7 +22,7 @@
     },
     {
       "name": "add_todo",
-      "description": "Append an open to-do to the project's .cindy/todos.md, creating the file if needed. Does not run git. Returns {project, item}; keep item to undo or move it with remove_item.",
+      "description": "Add an open to-do to the project's .cindy/todos.md, creating the file if needed. It goes above the first group heading, in no group. Does not run git. Returns {project, item}; keep item to undo or move it with remove_item.",
       "parameters": {
         "type": "object",
         "properties": {

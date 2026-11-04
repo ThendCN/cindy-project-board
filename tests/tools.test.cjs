@@ -105,6 +105,16 @@ test('add_todo 写入待办并交回 item；remove_item 用它撤销后文件恢
   assert.equal(await read(dir, '.cindy/todos.md'), before);
 });
 
+test('待办文件有分组时，add_todo 交回新条目本身，remove_item 用它撤销后文件恢复原样', async () => {
+  const before = '# 待办\n\n## 工程\n- [ ] 已有\n';
+  const dir = await project('看板', { '.cindy/todos.md': before });
+  const added = await tool('add_todo', { project: dir, text: '新的' });
+  assert.deepEqual(added.result.item, { kind: 'todo', line: 2, text: '新的' });
+
+  assert.equal((await tool('remove_item', { project: dir, item: added.result.item })).ok, true);
+  assert.equal(await read(dir, '.cindy/todos.md'), before);
+});
+
 test('add_note 写入资料并交回 item；remove_item 用它撤销', async () => {
   const dir = await project('收集箱');
   const added = await tool('add_note', { project: dir, text: '灵感：\n做个搜索' });
