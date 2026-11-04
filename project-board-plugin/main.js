@@ -93,7 +93,9 @@ const STATUS_LABELS = {
 };
 let widgetLabels = STATUS_LABELS.en;
 let widgetTimer = null;
-let widgetRetired = false; // 宿主不支持或没有权限时不再重试
+let widgetRunning = false;
+let widgetDirty = false; // 统计期间又来了事件，结束后再报一次
+let widgetRetired = false; // 宿主不支持这个能力时不再重试
 
 function onWidgetError(err) {
   if (/HOST_NOT_READY/.test(err.message)) setTimeout(scheduleSidebarWidget, 5000); // 启动时数据库可能还没好
@@ -118,15 +120,26 @@ async function publishSidebarWidget() {
     tone: status,
     taskIds: list.sort((a, b) => b.lastActivityAt - a.lastActivityAt).slice(0, 50).map((task) => task.id),
   }));
-  // 上报间隔大于宿主的限速，被拒只会是宿主不支持或没有权限，重试也不会好。
-  if ((await cindy.send({ type: 'sidebar-widget', groups }))?.ok === false) widgetRetired = true;
+  // 被拒（如权限被撤）不当成永久失败，下一个事件再试；旧版宿主不认识这条消息会抛错，走 onWidgetError。
+  await cindy.send({ type: 'sidebar-widget', groups });
 }
 
 function scheduleSidebarWidget() {
   if (widgetRetired || widgetTimer) return;
-  widgetTimer = setTimeout(() => {
+  if (widgetRunning) {
+    widgetDirty = true;
+    return;
+  }
+  // 统计串行，下一次至少隔 1 秒，所以两次上报不会撞上宿主 500 毫秒的限速。
+  widgetTimer = setTimeout(async () => {
     widgetTimer = null;
-    publishSidebarWidget().catch(onWidgetError);
+    widgetRunning = true;
+    await publishSidebarWidget().catch(onWidgetError);
+    widgetRunning = false;
+    if (widgetDirty) {
+      widgetDirty = false;
+      scheduleSidebarWidget();
+    }
   }, 1000);
 }
 
