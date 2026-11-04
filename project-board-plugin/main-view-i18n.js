@@ -27,6 +27,7 @@ const STRINGS = {
     branch: '分支', changes: '未提交改动', changesN: '{n} 个文件', clean: '无', commits: '最近提交', worktrees: 'worktree',
     notGit: '这个目录不是 Git 仓库。',
     worktreesWarn: '.cindy-worktrees/ 没有被 git 忽略，在主目录执行 git add . 可能把 worktree 副本加进提交。',
+    newTaskHint: '写下要做的事再发送，会在这个项目里新建一个任务并开始运行。',
     askHint: '确认或修改下面的提示词后发送，会在这个项目里新建一个任务并开始运行。', cancel: '取消', send: '发送到新任务', close: '关闭',
     sent: '已在「{p}」新建任务，可以在侧边栏的项目里查看进度。',
     sendErrors: {
@@ -87,6 +88,7 @@ const STRINGS = {
     branch: 'Branch', changes: 'Uncommitted', changesN: '{n} files', clean: 'None', commits: 'Recent commits', worktrees: 'Worktrees',
     notGit: 'This folder is not a Git repository.',
     worktreesWarn: '.cindy-worktrees/ is not ignored by git; running git add . in the main folder may commit the worktree copies.',
+    newTaskHint: 'Describe what to do, then send it. A new session will start in this project.',
     askHint: 'Review or edit the prompt, then send it. A new session will start in this project.', cancel: 'Cancel', send: 'Send to New Session', close: 'Close',
     sent: 'Started a new session in "{p}". Follow it from the project in the sidebar.',
     sendErrors: {
@@ -147,6 +149,7 @@ const STRINGS = {
     branch: '分支', changes: '未提交變更', changesN: '{n} 個檔案', clean: '無', commits: '最近提交', worktrees: 'worktree',
     notGit: '這個目錄不是 Git 儲存庫。',
     worktreesWarn: '.cindy-worktrees/ 沒有被 git 忽略，在主目錄執行 git add . 可能把 worktree 副本加進提交。',
+    newTaskHint: '寫下要做的事再傳送，會在這個專案裡新建一個任務並開始執行。',
     askHint: '確認或修改下面的提示詞後傳送，會在這個專案裡新建一個任務並開始執行。', cancel: '取消', send: '傳送到新任務', close: '關閉',
     sent: '已在「{p}」新建任務，可以在側邊欄的專案裡查看進度。',
     sendErrors: {
@@ -207,6 +210,7 @@ const STRINGS = {
     branch: 'ブランチ', changes: '未コミットの変更', changesN: '{n} ファイル', clean: 'なし', commits: '最近のコミット', worktrees: 'worktree',
     notGit: 'このフォルダは Git リポジトリではありません。',
     worktreesWarn: '.cindy-worktrees/ が git で無視されていません。メインフォルダで git add . を実行すると、worktree のコピーがコミットに含まれる可能性があります。',
+    newTaskHint: 'やることを入力して送信すると、このプロジェクトに新しいセッションが作成され、実行が始まります。',
     askHint: '下のプロンプトを確認・編集してから送信すると、このプロジェクトに新しいセッションが作成され、実行が始まります。', cancel: 'キャンセル', send: '新しいセッションに送信', close: '閉じる',
     sent: '「{p}」に新しいセッションを作成しました。サイドバーのプロジェクトから進捗を確認できます。',
     sendErrors: {
@@ -267,6 +271,7 @@ const STRINGS = {
     branch: '브랜치', changes: '커밋하지 않은 변경', changesN: '파일 {n}개', clean: '없음', commits: '최근 커밋', worktrees: 'worktree',
     notGit: '이 폴더는 Git 저장소가 아닙니다.',
     worktreesWarn: '.cindy-worktrees/가 git에서 무시되지 않습니다. 메인 폴더에서 git add .를 실행하면 worktree 복사본이 커밋에 포함될 수 있습니다.',
+    newTaskHint: '할 일을 입력해 보내면, 이 프로젝트에 새 세션이 만들어지고 실행이 시작됩니다.',
     askHint: '아래 프롬프트를 확인하거나 수정한 뒤 보내면, 이 프로젝트에 새 세션이 만들어지고 실행이 시작됩니다.', cancel: '취소', send: '새 세션으로 보내기', close: '닫기',
     sent: '「{p}」에 새 세션을 만들었습니다. 사이드바의 프로젝트에서 진행 상황을 볼 수 있습니다.',
     sendErrors: {
@@ -327,6 +332,7 @@ const STRINGS = {
     branch: 'Rama', changes: 'Sin confirmar', changesN: '{n} archivos', clean: 'Ninguno', commits: 'Commits recientes', worktrees: 'Worktrees',
     notGit: 'Esta carpeta no es un repositorio Git.',
     worktreesWarn: 'git no ignora .cindy-worktrees/; ejecutar git add . en la carpeta principal puede incluir en el commit las copias de los worktrees.',
+    newTaskHint: 'Describe lo que hay que hacer y envíalo. Se iniciará una sesión nueva en este proyecto.',
     askHint: 'Revisa o edita la instrucción y envíala. Se iniciará una sesión nueva en este proyecto.', cancel: 'Cancelar', send: 'Enviar a una sesión nueva', close: 'Cerrar',
     sent: 'Se inició una sesión nueva en «{p}». Sigue su progreso desde el proyecto en la barra lateral.',
     sendErrors: {
@@ -387,6 +393,7 @@ const STRINGS = {
     branch: 'Branche', changes: 'Non validé', changesN: '{n} fichiers', clean: 'Aucun', commits: 'Commits récents', worktrees: 'Worktrees',
     notGit: 'Ce dossier n\'est pas un dépôt Git.',
     worktreesWarn: '.cindy-worktrees/ n\'est pas ignoré par git ; un git add . dans le dossier principal peut ajouter les copies des worktrees au commit.',
+    newTaskHint: 'Décrivez ce qu\'il faut faire, puis envoyez. Une nouvelle session démarrera dans ce projet.',
     askHint: 'Relisez ou modifiez l\'instruction, puis envoyez-la. Une nouvelle session démarrera dans ce projet.', cancel: 'Annuler', send: 'Envoyer dans une nouvelle session', close: 'Fermer',
     sent: 'Nouvelle session démarrée dans « {p} ». Suivez-la depuis le projet dans la barre latérale.',
     sendErrors: {
@@ -447,6 +454,7 @@ const STRINGS = {
     branch: 'Branch', changes: 'Nicht committet', changesN: '{n} Dateien', clean: 'Keine', commits: 'Letzte Commits', worktrees: 'Worktrees',
     notGit: 'Dieser Ordner ist kein Git-Repository.',
     worktreesWarn: '.cindy-worktrees/ wird von git nicht ignoriert; ein git add . im Hauptordner kann die Worktree-Kopien in den Commit aufnehmen.',
+    newTaskHint: 'Beschreibe die Aufgabe und sende sie dann. In diesem Projekt startet eine neue Sitzung.',
     askHint: 'Prüfe oder bearbeite den Prompt und sende ihn dann. In diesem Projekt startet eine neue Sitzung.', cancel: 'Abbrechen', send: 'An neue Sitzung senden', close: 'Schließen',
     sent: 'Neue Sitzung in „{p}“ gestartet. Verfolge sie über das Projekt in der Seitenleiste.',
     sendErrors: {
@@ -507,6 +515,7 @@ const STRINGS = {
     branch: 'Branch', changes: 'Não commitado', changesN: '{n} arquivos', clean: 'Nenhum', commits: 'Commits recentes', worktrees: 'Worktrees',
     notGit: 'Esta pasta não é um repositório Git.',
     worktreesWarn: 'O git não ignora .cindy-worktrees/; rodar git add . na pasta principal pode incluir as cópias dos worktrees no commit.',
+    newTaskHint: 'Descreva o que fazer e envie. Uma nova sessão vai começar neste projeto.',
     askHint: 'Revise ou edite o prompt e envie. Uma nova sessão vai começar neste projeto.', cancel: 'Cancelar', send: 'Enviar para nova sessão', close: 'Fechar',
     sent: 'Nova sessão iniciada em "{p}". Acompanhe pelo projeto na barra lateral.',
     sendErrors: {
@@ -567,6 +576,7 @@ const STRINGS = {
     branch: 'Ramo', changes: 'Por submeter', changesN: '{n} ficheiros', clean: 'Nenhum', commits: 'Commits recentes', worktrees: 'Worktrees',
     notGit: 'Esta pasta não é um repositório Git.',
     worktreesWarn: 'O git não ignora .cindy-worktrees/; executar git add . na pasta principal pode incluir as cópias dos worktrees no commit.',
+    newTaskHint: 'Descreva o que deve ser feito e envie. Vai começar uma nova sessão neste projeto.',
     askHint: 'Reveja ou edite as instruções e envie. Vai começar uma nova sessão neste projeto.', cancel: 'Cancelar', send: 'Enviar para nova sessão', close: 'Fechar',
     sent: 'Nova sessão iniciada em "{p}". Acompanhe-a a partir do projeto na barra lateral.',
     sendErrors: {

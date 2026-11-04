@@ -21,7 +21,7 @@
   <main id="overview" class="overview" hidden></main>
   <main id="board" class="board" hidden>
     <section class="card tasks">
-      <div class="card-head"><h2><span data-t="tasks"></span> <span id="task-count" class="count"></span></h2></div>
+      <div class="card-head"><h2><span data-t="tasks"></span> <span id="task-count" class="count"></span></h2><span class="head-acts"><button id="task-new" class="ai" type="button" data-t="newTask"></button></span></div>
       <div id="task-body"></div>
     </section>
     <div class="col">
@@ -66,7 +66,7 @@
   <dialog id="ask">
     <form method="dialog" class="dialog">
       <h3 id="ask-title"></h3>
-      <p class="meta" data-t="askHint"></p>
+      <p id="ask-hint" class="meta"></p>
       <textarea id="ask-text" rows="9"></textarea>
       <div class="actions">
         <button value="cancel" class="ghost" data-t="cancel"></button>
