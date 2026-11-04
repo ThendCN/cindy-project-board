@@ -947,7 +947,9 @@ function editDoc(id, content) {
 function openAsk(next) {
   ask = next;
   $('ask-title').textContent = next.heading;
+  $('ask-hint').textContent = next.hint || S.askHint;
   $('ask-text').value = next.text;
+  $('ask-send').disabled = !next.text.trim();
   $('ask').showModal();
 }
 const openAiAsk = (kind) => openAsk({ heading: S.titles[kind], title: S.titles[kind], text: fmt(S.prompts[kind], { dir: current.id }) });
@@ -958,10 +960,11 @@ $('ask').addEventListener('close', async () => {
   if (!text) return;
   const project = current;
   const sending = ask; // 发送期间可能又打开新的提问框，这里固定本次的内容
+  const firstLine = text.split('\n')[0];
   try {
     const res = await call('askAi', {
       dir: project.id,
-      title: sending.title,
+      title: sending.title || (firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine),
       text,
       requestKey: `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     });
@@ -1157,6 +1160,8 @@ async function init() {
   document.querySelector('[data-ai="todos"]').textContent = S.organize;
   document.querySelector('[data-ai="extract"]').textContent = S.extract;
   document.querySelectorAll('[data-ai]').forEach((el) => el.addEventListener('click', () => openAiAsk(el.dataset.ai)));
+  $('task-new').addEventListener('click', () => openAsk({ heading: S.newTask, hint: S.newTaskHint, text: '' }));
+  $('ask-text').addEventListener('input', () => { $('ask-send').disabled = !$('ask-text').value.trim(); });
   $('todo-new').placeholder = S.todoNew;
   $('todo-add').addEventListener('submit', addTodo);
   $('note-new').placeholder = S.noteNew;
