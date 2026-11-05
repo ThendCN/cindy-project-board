@@ -59,6 +59,8 @@ const OPS = {
   tasks,
   openTask: ({ taskId }) => cindy.observe.openTask({ taskId }),
   askAi,
+  createWorktree: (args) => node('project/create-worktree', args),
+  removeWorktree: (args) => node('project/remove-worktree', args),
 };
 
 function codeError(code, message) {
