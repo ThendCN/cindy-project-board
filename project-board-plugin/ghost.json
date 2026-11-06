@@ -5,7 +5,8 @@
   "name": "Project Board",
   "description": "See each project's tasks by status, introduction, to-dos, AGENTS.md and other docs plus Git status in one page, plus an overview of all projects. Docs live in the project's .cindy folder, are committed with git, and can be edited directly or generated and updated by AI.",
   "whenToUse": "When the user wants an overview of one or all projects (tasks, intro, to-dos, AGENTS.md / CLAUDE.md, knowledge, Git status), asks to save a to-do, idea or note to a project or the inbox, including from chat channels such as WeChat, or asks to propose lasting project knowledge for review.",
-  "version": "0.6.0",
+  "version": "0.8.1",
+  "releaseNotes": "Compared with the listed 0.7.0: New Public access card on each project's board makes the project's local port reachable from the internet over HTTPS, with Cloudflare Quick Tunnel, your own domain on Cloudflare or Tailscale Funnel. It only uses cloudflared or tailscale already installed on the computer and does not offer to download or install them. Before anything is made public, a dialog explains that the whole service on that port becomes reachable, including write and admin endpoints and any data it can read, and you must confirm. Visitors must sign in: each time you share, a new access code is created, which is only entered on a sign-in page (sent by POST, never in a URL) and exchanged for a random session in a Secure, HttpOnly cookie that lasts 12 hours; you can also copy a one-time link that works once within 1 hour. Repeated wrong codes are rate-limited, plain HTTP visits are redirected to HTTPS, and stopping revokes the code, links and all sessions. Dev servers keep working: the Host header is rewritten to localhost, redirects to localhost point back to the public address, WebSockets are forwarded, local HTTPS and IPv6-only servers are detected, and it will not start when nothing is running on the port. Tunnels close when Cindy quits or the plugin is disabled. The overview and the project rail mark projects that are public. Tunnels run in a second Node process, so this update may ask you to confirm the plugin's permissions again.",
   "entry": "main.js",
   "icon": "assets/icon.png",
   "locales": {
@@ -116,6 +117,7 @@
   },
   "node": {
     "entry": "node/worker.cjs",
+    "entries": ["node/tunnel.cjs"],
     "protocol": "json-rpc-stdio",
     "lifecycle": "on-demand",
     "idleTimeoutSeconds": 120

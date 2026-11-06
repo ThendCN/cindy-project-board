@@ -24,6 +24,46 @@ async function node(method, params) {
   return response.result;
 }
 
+// 公开访问：隧道在单独的 Node 进程里（node/tunnel.cjs）。它按需启动、空闲 120 秒被回收，
+// 所以有隧道开着（或正在登录 Cloudflare）时每 50 秒来问一次状态，让它一直活着。
+const TUNNEL_ENTRY = 'node/tunnel.cjs';
+let tunnelKeepAlive = null;
+
+async function tunnel(method, params = {}, timeoutMs = 30000) {
+  const response = await cindy.node.request({ entry: TUNNEL_ENTRY, method, params, timeoutMs });
+  // 工作进程把错误码放在 message 开头：「CODE」或「CODE: 详情」。
+  if (!response.ok) {
+    const [, code, detail] = /^([A-Z_]+)(?::\s*([\s\S]*))?$/.exec(response.message || '') || [];
+    throw codeError(code || 'NODE_FAILED', detail || response.message);
+  }
+  return response.result;
+}
+
+function keepTunnels(state) {
+  const busy = state.tunnels.length > 0 || state.loggingIn;
+  if (busy && !tunnelKeepAlive) tunnelKeepAlive = setInterval(() => tunnelList().catch(() => {}), 50000);
+  if (!busy && tunnelKeepAlive) {
+    clearInterval(tunnelKeepAlive);
+    tunnelKeepAlive = null;
+  }
+  return state;
+}
+const tunnelList = async () => keepTunnels(await tunnel('tunnel/list'));
+
+async function tunnelStart(args) {
+  await requireProject(args.dir);
+  // 命名隧道要先建隧道、配 DNS，再等连上，比一般请求久。
+  const result = await tunnel('tunnel/start', args, 100000);
+  await tunnelList();
+  return result;
+}
+
+async function tunnelLogin() {
+  const result = await tunnel('tunnel/cloudflare-login', {}, 30000);
+  await tunnelList();
+  return result;
+}
+
 // 任务列表走 Host 只读的 cindy.observe（需 agent.observe 权限）；旧版 Cindy 没有这个入口。
 async function tasks({ dir }) {
   if (typeof cindy.observe?.projectTasks !== 'function') throw codeError('OBSERVE_UNSUPPORTED');
@@ -61,6 +101,14 @@ const OPS = {
   askAi,
   createWorktree: (args) => node('project/create-worktree', args),
   removeWorktree: (args) => node('project/remove-worktree', args),
+  tunnelTools: () => tunnel('tunnel/tools'),
+  tunnelList,
+  tunnelStart,
+  // 停止不核对项目：项目刚从 Cindy 移除时也要能关掉它的隧道。
+  tunnelStop: ({ dir }) => tunnel('tunnel/stop', { dir }, 20000).then(async (r) => { await tunnelList(); return r; }),
+  tunnelInvite: ({ dir }) => tunnel('tunnel/invite', { dir }),
+  tunnelLogin,
+  openUrl: ({ url }) => tunnel('tunnel/open-url', { url }),
 };
 
 function codeError(code, message) {
@@ -214,6 +262,17 @@ cindy.onHostMessage((msg) => {
     return scheduleSidebarWidget();
   }
   if (msg?.type !== 'event' || msg.name?.startsWith('did-thinking-')) return;
+  // 隧道连上、断开，或隧道进程停了（插件停用、崩溃）：只让主视图重读隧道状态，不当成任务事件。
+  if (msg.name === 'node-notification' && msg.method === 'tunnel/changed') {
+    return channel.postMessage({ type: 'event', name: 'tunnel-changed' });
+  }
+  if (msg.name === 'node-status' && msg.entry === TUNNEL_ENTRY) {
+    if (msg.state === 'stopped' || msg.state === 'crashed') {
+      keepTunnels({ tunnels: [] });
+      channel.postMessage({ type: 'event', name: 'tunnel-changed' });
+    }
+    return;
+  }
   scheduleSidebarWidget(); // 切换任务不用刷新看板，但看过「刚完成」的任务后状态条要变
   if (msg.name === 'did-session-switched') return;
   channel.postMessage({ type: 'event', name: msg.name, dropped: msg.dropped || 0 });

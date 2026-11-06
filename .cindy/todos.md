@@ -2,6 +2,21 @@
 
 - [x] 发现一个严重问题，如果同时从待办开始多个任务的时候，会产生编码冲突，这里应该使用worktree,或者在批量开始任务的时候让ai分析如何分配任务
 
+## 公开访问（把项目的本地端口映射到公网）
+
+- [x] 隧道工作进程 `node/tunnel.cjs`：检测 cloudflared / tailscale / frpc / ssh，五种方式启动和停止，本机反向代理（改 Host、访问口令、改写跳转、WebSocket）
+- [x] 看板右栏「公开访问」卡片：选方式、填端口和参数、显示地址和口令；未安装时给安装命令和「让 AI 帮我安装」；总览和项目栏标出公开中的项目；界面 10 种语言
+- [x] 补测试 `tests/tunnel.test.cjs`；本机实测快速隧道、localhost.run、frp（本机 frps）连通，Tailscale 未开 Funnel 时能拿到开启链接
+- [x] 安装到 Cindy 后实测：多条隧道同时开、空闲 2 分钟以上不断、更新插件时隧道程序都被关掉；HTTP、WebSocket、口令都通过；「让 AI 帮我安装」装好了 cloudflared
+- [x] 实测中修掉：只监听 `::1` 的本地服务连不上、本地 HTTPS 服务循环跳转、端口填错时只看到 Cloudflare 的 502 页
+- [x] 市场审核 0.8.0 未通过后修改：口令只在登录页 POST、登录后发会话、一次性分享链接、明文 HTTP 跳 HTTPS、输错限速；开始前弹窗说明公开范围和风险并要求确认；去掉安装引导和 AI 代装；去掉保证不了 HTTPS 的 frp 和 SSH 隧道
+- [ ] 实测退出 Cindy 后隧道程序被关掉
+- [ ] 用真实 Cloudflare 账号实测自有域名：登录、建隧道、配 DNS、重复开同一域名
+- [ ] 在 tailnet 开启 Funnel 后实测 Tailscale 方式的地址和停止后的收尾
+- [ ] 在 macOS、Windows 上实测找工具（Homebrew、winget 安装位置）和强杀后的收尾
+- [ ] 再加回 frp：改用 https 类型 + https2http 插件（TLS 在本机终止，需要用户提供证书和私钥路径）
+- [ ] 用 Vite、Next.js 开发服务器实测热更新（WebSocket）经隧道能否正常工作
+
 ## 侧栏状态条（底座 `sidebarWidget` 原型，分支 `feat/plugin-sidebar-widget`）
 
 - [x] 底座：新增 `sidebarWidget` 能力，宿主在「全部任务」下绘制状态胶囊和任务行

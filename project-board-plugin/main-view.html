@@ -54,6 +54,10 @@
           <ul id="file-list" class="file-list"></ul>
         </details>
       </section>
+      <section class="card share">
+        <div class="card-head"><h2><span data-t="shareTitle"></span> <span id="share-state" class="count"></span></h2></div>
+        <div id="share-body"></div>
+      </section>
       <section class="card git">
         <div class="card-head"><h2>Git</h2></div>
         <div id="git-body"></div>
@@ -90,6 +94,17 @@
       <h3 id="viewer-title"></h3>
       <div id="viewer-body"></div>
       <div id="viewer-actions" class="actions"></div>
+    </form>
+  </dialog>
+  <dialog id="share-confirm">
+    <form method="dialog" class="dialog">
+      <h3 id="share-confirm-title"></h3>
+      <ul id="share-confirm-body" class="share-risks"></ul>
+      <label class="share-check"><input id="share-confirm-check" type="checkbox"><span data-t="shareConfirmCheck"></span></label>
+      <div class="actions">
+        <button value="cancel" class="ghost" data-t="cancel"></button>
+        <button id="share-confirm-ok" value="ok" class="primary" data-t="shareConfirmOk"></button>
+      </div>
     </form>
   </dialog>
   <div id="toast" class="toast" hidden></div>

@@ -167,3 +167,20 @@ dialog.wide { width: min(880px, 94vw); }
 .pc-badge.done { color: var(--success-fg, #22a35a); border-color: currentColor; }
 .pc-badge.muted { color: var(--muted); }
 
+
+/* 公开访问 */
+.share-form { display: flex; flex-direction: column; gap: 8px; }
+.share-form .meta, .share .meta { margin: 0; }
+.share-field { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 12px; }
+.share-field input, .share-field select { font: inherit; font-size: 13px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; min-width: 0; }
+.share-field select { border-radius: 9999px; padding: 5px 12px; }
+.share-check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.share-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.share-url, .share-key { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.share-link { flex: 1; min-width: 0; border: 0; border-radius: 6px; padding: 2px 4px; background: none; text-align: left; font-weight: 600; text-decoration: underline; overflow-wrap: anywhere; }
+.share-key span { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; }
+.share-risks { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.share-log summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+.share-log pre { margin: 4px 0 0; max-height: 160px; overflow: auto; background: var(--hover); border-radius: 8px; padding: 6px 10px; font: 11px ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dot.public { color: var(--warning-fg, #c27c0e); }
+.pc-badge.public { color: var(--warning-fg, #c27c0e); border-color: currentColor; }
