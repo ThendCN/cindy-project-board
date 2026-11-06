@@ -41,6 +41,11 @@ const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>
 const channel = new BroadcastChannel('project-board');
 const pending = new Map();
 channel.onmessage = ({ data }) => {
+  if (data?.type === 'event' && data.name === 'tunnel-changed') {
+    // 隧道连上、断开：只重读隧道状态，不重读任务和资料。
+    loadShare(false).then(() => { if (view === 'all') redrawOverview(); }).catch(() => {});
+    return;
+  }
   if (data?.type === 'event') {
     // 一轮结束、任务新建 / 归档时 AI 可能改了文件，连资料一起重读；其余（开始、审批、提问）只重读任务。
     // board-changed 是 Agent 经插件工具记了待办或资料。
@@ -802,6 +807,7 @@ function render() {
     renderCandidates();
     renderLibrary();
     renderFiles();
+    renderShare();
     renderGit();
   });
 }
@@ -825,6 +831,7 @@ async function load() {
   snap = snapshot.value;
   notice('');
   render();
+  loadShare(false).catch(() => {});
   // 当前项目的待办数和改动数直接用刚读到的资料，不再跑一遍 git
   const open = snap.todos.filter((t) => !t.done).length;
   stats.set(dir, { tasks: Array.isArray(taskList) ? taskList : null, summary: { openTodos: open, candidates: snap.candidates.length, git: snap.git && { branch: snap.git.branch, changedFiles: snap.git.changedFiles } } });
@@ -1008,17 +1015,323 @@ $('ask').addEventListener('close', async () => {
   }
 });
 
+// ---------- 公开访问：把项目的本地端口映射到公网 ----------
+// 隧道用这台电脑上已装的 cloudflared / tailscale / frpc / ssh 建立（在 node/tunnel.cjs 里）；这里只选方式、填参数、显示地址。
+const SHARE_MODES = [['cloudflare-quick', 'cloudflared'], ['cloudflare', 'cloudflared'], ['tailscale', 'tailscale'], ['frp', 'frpc'], ['ssh', 'ssh']];
+const TOOL_OF = Object.fromEntries(SHARE_MODES);
+// 安装命令不用翻译；没有命令的平台只给官方下载页。
+const INSTALL = {
+  cloudflared: { darwin: 'brew install cloudflared', win32: 'winget install --id Cloudflare.cloudflared', docs: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/' },
+  tailscale: { linux: 'curl -fsSL https://tailscale.com/install.sh | sh', docs: 'https://tailscale.com/download' },
+  frpc: { darwin: 'brew install frpc', docs: 'https://github.com/fatedier/frp/releases' },
+  ssh: { win32: 'Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0', docs: 'https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse' },
+};
+let share = null; // 这台电脑上的隧道 { tunnels, projects, frp, loggingIn }；读不到时为 { error }
+let shareTools = null; // 检测到的工具；null = 需要重新检测
+let shareDraft = null; // 当前项目表单里填的内容；切换项目时清空
+let shareBusy = false;
+let cfLoginUrl = null;
+
+const tunnelOf = (dir) => share?.tunnels?.find((t) => t.dir === dir);
+const isPublic = (dir) => tunnelOf(dir)?.state === 'online';
+
+async function loadShare(withTools) {
+  const wasLoggingIn = share?.loggingIn;
+  const [state, tools] = await Promise.allSettled([call('tunnelList'), withTools || !shareTools ? call('tunnelTools') : shareTools]);
+  share = state.status === 'fulfilled' ? state.value : { error: state.reason.message };
+  if (tools.status === 'fulfilled') shareTools = tools.value;
+  // Cloudflare 登录结束（浏览器里授权完或放弃）后重新检测一次，才知道登没登上。
+  if (wasLoggingIn && !share.loggingIn) {
+    cfLoginUrl = null;
+    shareTools = await call('tunnelTools').catch(() => shareTools);
+  }
+  renderRail();
+  if (view === 'project' && snap) renderShare();
+}
+
+function h(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    // 嵌入页里剪贴板接口可能不可用，退回旧办法
+    const area = h('textarea');
+    area.value = value;
+    document.body.append(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+  toast(S.share.copied);
+}
+const openLink = (url) => call('openUrl', { url }).catch((err) => toast(fmt(S.failed, { m: err.message })));
+
+function shareField(label, input) {
+  const box = h('label', 'share-field');
+  box.append(h('span', '', label), input);
+  return box;
+}
+function draftInput(key, { type = 'text', placeholder = '', onInput } = {}) {
+  const input = h('input');
+  input.type = type;
+  input.placeholder = placeholder;
+  input.value = shareDraft[key] ?? '';
+  input.addEventListener('input', () => {
+    shareDraft[key] = input.value;
+    onInput?.();
+  });
+  return input;
+}
+
+const shareError = (error) => S.share.errors[error?.code] || S.share.errors.TOOL_FAILED;
+
+// 正在填写时不被自动刷新冲掉；用户自己的操作传 force。
+function renderShare(force) {
+  const body = $('share-body');
+  if (!force && body.contains(document.activeElement) && document.activeElement.matches('input, select')) return;
+  const tunnel = tunnelOf(current.id);
+  $('share-state').textContent = tunnel?.state === 'online' ? S.share.online : '';
+  body.replaceChildren();
+  if (share?.error) body.append(h('p', 'empty', fmt(S.failed, { m: share.error })));
+  else if (!share || !shareTools) body.append(h('p', 'empty', S.share.checking));
+  else if (tunnel) renderTunnel(body, tunnel);
+  else renderShareForm(body);
+}
+
+function renderTunnel(body, t) {
+  const mode = S.share.modes[t.mode];
+  const acts = h('div', 'actions');
+  if (t.state === 'starting') {
+    body.append(h('p', 'meta', fmt(S.share.starting, { mode: mode.name })));
+    acts.append(todoButton(S.share.stop, stopShare));
+  } else if (t.state === 'online') {
+    const row = h('div', 'share-url');
+    const link = h('button', 'share-link', t.url);
+    link.type = 'button';
+    link.title = S.share.openInBrowser;
+    link.addEventListener('click', () => openLink(t.url));
+    row.append(link, todoButton(S.share.copy, () => copyText(t.url), 'ghost small'));
+    body.append(row);
+    if (t.key) {
+      const keyRow = h('div', 'share-key');
+      keyRow.append(h('span', '', fmt(S.share.key, { k: t.key })), todoButton(S.share.copyShare, () => copyText(t.shareUrl), 'ghost small'));
+      body.append(keyRow, h('p', 'meta', S.share.keyHint));
+    } else {
+      body.append(h('p', 'warn', S.share.noKeyWarn));
+    }
+    body.append(h('p', 'meta', fmt(S.share.onlineMeta, { port: t.port, mode: mode.name, t: ago(t.startedAt) })));
+    if (mode.note) body.append(h('p', 'meta', mode.note));
+    acts.append(todoButton(S.share.stop, stopShare));
+  } else {
+    body.append(h('p', 'warn', shareError(t.error)));
+    if (t.error?.actionUrl) acts.append(todoButton(S.share.openAction, () => openLink(t.error.actionUrl)));
+    if (t.error?.message && t.error.message !== t.error.code) {
+      const details = h('details', 'share-log');
+      details.append(h('summary', '', S.share.details), h('pre', '', t.error.message));
+      body.append(details);
+    }
+    acts.append(todoButton(S.share.dismiss, stopShare), todoButton(S.share.retry, () => startShare(t.mode), 'primary'));
+  }
+  body.append(acts);
+}
+
+function defaultMode() {
+  return (SHARE_MODES.find(([, tool]) => shareTools[tool]?.installed) || SHARE_MODES[0])[0];
+}
+
+function renderShareForm(body) {
+  const saved = share.projects?.[current.id] || {};
+  shareDraft ||= {
+    mode: saved.mode || defaultMode(), port: saved.port ? String(saved.port) : '', auth: saved.auth ?? true,
+    hostname: saved.hostname || '', domain: saved.domain || '', remotePort: saved.remotePort ? String(saved.remotePort) : '',
+  };
+  const d = shareDraft;
+  const tool = TOOL_OF[d.mode];
+  const info = shareTools[tool];
+  const form = h('div', 'share-form');
+  body.append(form);
+
+  const select = h('select');
+  for (const [id, t] of SHARE_MODES) {
+    select.append(new Option(shareTools[t]?.installed ? S.share.modes[id].name : fmt(S.share.notInstalledTag, { m: S.share.modes[id].name }), id));
+  }
+  select.value = d.mode;
+  select.addEventListener('change', () => { d.mode = select.value; renderShare(true); });
+  form.append(shareField(S.share.mode, select), h('p', 'meta', S.share.modes[d.mode].hint));
+
+  if (!info?.installed) return renderInstall(form, tool);
+  if (info.tooOld) form.append(h('p', 'warn', fmt(S.share.frpTooOld, { v: info.version })));
+
+  const start = todoButton(shareBusy ? S.share.startingShort : S.share.start, () => startShare(d.mode), 'primary');
+  const ready = () => {
+    const port = Number(d.port);
+    let ok = Number.isInteger(port) && port > 0 && port < 65536 && !info.tooOld;
+    if (d.mode === 'cloudflare') ok &&= shareTools.cloudflared.loggedIn && Boolean(d.hostname.trim());
+    if (d.mode === 'frp') ok &&= Boolean(share.frp) && Boolean(d.domain.trim() || d.remotePort.trim());
+    if (d.mode === 'tailscale') ok &&= shareTools.tailscale.running;
+    start.disabled = shareBusy || !ok;
+  };
+  form.append(shareField(S.share.port, draftInput('port', { type: 'number', placeholder: '5173', onInput: ready })));
+
+  if (d.mode === 'cloudflare') renderCloudflare(form, ready);
+  if (d.mode === 'frp') renderFrp(form, ready);
+  if (d.mode === 'tailscale') {
+    form.append(shareTools.tailscale.running
+      ? h('p', 'meta', fmt(S.share.tsHost, { h: shareTools.tailscale.host || '' }))
+      : h('p', 'warn', S.share.tsNotRunning));
+  }
+
+  const auth = h('label', 'share-check');
+  const box = h('input');
+  box.type = 'checkbox';
+  box.checked = d.auth;
+  box.addEventListener('change', () => { d.auth = box.checked; });
+  auth.append(box, h('span', '', S.share.auth));
+  form.append(auth);
+  const acts = h('div', 'actions');
+  acts.append(start);
+  form.append(acts);
+  ready();
+}
+
+function renderCloudflare(form, ready) {
+  const cf = shareTools.cloudflared;
+  if (cf.loggedIn) {
+    form.append(shareField(S.share.hostname, draftInput('hostname', { placeholder: 'demo.example.com', onInput: ready })), h('p', 'meta', S.share.hostnameHint));
+    return;
+  }
+  form.append(h('p', 'meta', share.loggingIn ? S.share.cfWaiting : S.share.cfLoginHint));
+  const acts = h('div', 'share-acts');
+  if (share.loggingIn && cfLoginUrl) acts.append(todoButton(S.share.cfOpenAgain, () => openLink(cfLoginUrl)));
+  if (!share.loggingIn) acts.append(todoButton(S.share.cfLogin, cloudflareLogin));
+  acts.append(todoButton(S.share.recheck, () => loadShare(true)));
+  form.append(acts);
+}
+
+function renderFrp(form, ready) {
+  if (!share.frp || shareDraft.frpEditing) {
+    shareDraft.frpAddr ??= share.frp?.serverAddr || '';
+    shareDraft.frpPort ??= String(share.frp?.serverPort || 7000);
+    shareDraft.frpToken ??= '';
+    const box = h('div', 'share-server');
+    box.append(
+      h('p', 'meta', S.share.frpServerHint),
+      shareField(S.share.frpAddr, draftInput('frpAddr', { placeholder: 'frp.example.com' })),
+      shareField(S.share.frpPort, draftInput('frpPort', { type: 'number', placeholder: '7000' })),
+      shareField(S.share.frpToken, draftInput('frpToken', { type: 'password', placeholder: share.frp?.hasToken ? S.share.frpTokenKeep : '' })),
+    );
+    const acts = h('div', 'share-acts');
+    if (share.frp) acts.append(todoButton(S.cancel, () => { shareDraft.frpEditing = false; renderShare(true); }));
+    acts.append(todoButton(S.save, saveFrp));
+    box.append(acts);
+    form.append(box);
+    return;
+  }
+  const server = h('div', 'share-acts');
+  server.append(h('span', 'meta', fmt(S.share.frpServer, { s: `${share.frp.serverAddr}:${share.frp.serverPort}` })),
+    todoButton(S.edit, () => { shareDraft.frpEditing = true; renderShare(true); }, 'ghost small'));
+  form.append(server,
+    shareField(S.share.frpDomain, draftInput('domain', { placeholder: 'demo.example.com', onInput: ready })),
+    shareField(S.share.frpRemotePort, draftInput('remotePort', { type: 'number', placeholder: '6000', onInput: ready })),
+    h('p', 'meta', S.share.frpTargetHint));
+}
+
+function renderInstall(form, tool) {
+  const platform = shareTools.platform;
+  const command = INSTALL[tool][platform];
+  const name = tool === 'frpc' ? 'frp (frpc)' : tool;
+  form.append(h('p', 'warn', fmt(S.share.notInstalled, { t: name })));
+  if (command) {
+    const pre = h('pre', 'share-cmd', command);
+    form.append(pre);
+  }
+  if (tool === 'ssh' && platform !== 'win32') form.append(h('p', 'meta', S.share.sshBuiltIn));
+  const acts = h('div', 'share-acts');
+  if (command) acts.append(todoButton(S.share.copy, () => copyText(command), 'ghost small'));
+  acts.append(
+    todoButton(S.share.installDocs, () => openLink(INSTALL[tool].docs)),
+    todoButton(S.share.installAi, () => openAsk({ heading: S.share.installHeading, title: fmt(S.share.installTitle, { t: name }), text: fmt(S.share.installPrompt, { t: name, os: platform }) }), 'ai'),
+    todoButton(S.share.recheck, () => loadShare(true)),
+  );
+  form.append(acts);
+}
+
+async function cloudflareLogin() {
+  try {
+    const res = await call('tunnelLogin');
+    if (res.url) {
+      cfLoginUrl = res.url;
+      toast(S.share.cfOpened);
+    }
+  } catch (err) {
+    toast(fmt(S.failed, { m: S.share.errors[err.code] || err.message }));
+  }
+  await loadShare(true);
+}
+
+async function saveFrp() {
+  const d = shareDraft;
+  try {
+    await call('tunnelSaveFrp', { serverAddr: d.frpAddr, serverPort: d.frpPort, token: d.frpToken || undefined });
+    d.frpEditing = false;
+    d.frpToken = '';
+    toast(S.share.frpSaved);
+  } catch (err) {
+    toast(S.share.errors[err.code] || fmt(S.failed, { m: err.message }));
+  }
+  await loadShare(false);
+}
+
+async function startShare(mode) {
+  const dir = current.id;
+  const saved = share.projects?.[dir] || {};
+  // 重试时表单不在页面上，用上次保存的设置。
+  const d = shareDraft && shareDraft.mode === mode ? shareDraft : { ...saved, mode };
+  shareBusy = true;
+  renderShare(true);
+  try {
+    const res = await call('tunnelStart', {
+      dir, mode, port: Number(d.port), auth: d.auth ?? true,
+      hostname: d.hostname?.trim() || undefined, domain: d.domain?.trim() || undefined, remotePort: d.remotePort ? Number(d.remotePort) : undefined,
+    });
+    if (res.state === 'online') toast(S.share.started);
+  } catch (err) {
+    // 等待超时只说明还没连上，隧道还在建，状态变化时会刷新。
+    if (err.code !== 'TIMEOUT') toast(S.share.errors[err.code] || fmt(S.failed, { m: err.message }));
+  } finally {
+    shareBusy = false;
+  }
+  if (current?.id === dir) shareDraft = null;
+  await loadShare(false);
+}
+
+async function stopShare() {
+  try {
+    await call('tunnelStop', { dir: current.id });
+  } catch (err) {
+    toast(fmt(S.failed, { m: err.message }));
+  }
+  await loadShare(false);
+}
+
 // ---------- 全部项目总览 ----------
 const ATTENTION = new Set(['awaiting', 'error']);
 
 async function loadOverview() {
   $('board').hidden = true;
   $('path').hidden = true;
-  await loadStats(true);
+  await Promise.all([loadStats(true), loadShare(false).catch(() => {})]);
   if (view !== 'all') return;
   notice('');
-  withKept(() => renderOverview(projects.map((p) => ({ project: p, ...stats.get(p.id) }))));
+  redrawOverview();
 }
+const redrawOverview = () => withKept(() => renderOverview(projects.map((p) => ({ project: p, ...stats.get(p.id) }))));
 
 // 读各项目的任务；full 时再读待办数和 Git 摘要（每个项目都要跑 git，只在整体刷新时读），否则沿用上次的。
 async function loadStats(full) {
@@ -1080,6 +1393,7 @@ function renderRail() {
     if (!badges.length && summary?.openTodos) {
       badges.push(badge('', fmt(S.overview.todos, { n: summary.openTodos })));
     }
+    if (isPublic(p.id)) badges.push(badge('dot public', S.share.badge));
     return item(p.id, p.label, badges);
   }));
 }
@@ -1119,6 +1433,7 @@ function projectCard(row) {
   if (row.running) badge(fmt(S.overview.running, { n: row.running }), 'running');
   if (row.done) badge(fmt(S.overview.done, { n: row.done }), 'done');
   if (row.tasks && !row.attention && !row.running && !row.done) badge(S.overview.quiet, 'muted');
+  if (isPublic(row.project.id)) badge(S.share.badge, 'public');
   if (row.summary?.candidates) badge(fmt(S.overview.candidates, { n: row.summary.candidates }), 'todos');
   if (row.summary) badge(row.summary.openTodos ? fmt(S.overview.todos, { n: row.summary.openTodos }) : S.overview.noTodos, row.summary.openTodos ? 'todos' : 'muted');
 
@@ -1143,6 +1458,7 @@ function switchTo(id) {
   editingIntro = null;
   introOpen = false;
   selected = null;
+  shareDraft = null;
   if (id === ALL) view = 'all';
   else {
     view = 'project';
@@ -1232,6 +1548,8 @@ async function init() {
   // 任务事件到达时会立即刷新（见 channel.onmessage）；这里是兜底：
   // 自动化等不推送事件的任务每 30 秒重读一次，AI 在后台改的文件每 60 秒整体重读一次。
   document.addEventListener('visibilitychange', () => { if (idle()) load(); });
+  // 用户可能刚去装了 cloudflared 等工具，回到页面时重新检测。
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) shareTools = null; });
   let tick = 0;
   setInterval(() => {
     tick += 1;

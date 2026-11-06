@@ -117,6 +117,7 @@
   },
   "node": {
     "entry": "node/worker.cjs",
+    "entries": ["node/tunnel.cjs"],
     "protocol": "json-rpc-stdio",
     "lifecycle": "on-demand",
     "idleTimeoutSeconds": 120

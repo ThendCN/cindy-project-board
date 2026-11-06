@@ -19,6 +19,7 @@
 - **资料库**：放在右栏顶部，下方是 Git。「文档与文件」列出 `.cindy/project-knowledge/` 下的全部文件（TOC.md 排最前，Markdown 显示标题），可上传文件（单个不超过 50 MB，分块经 Node 进程写入，同名自动加序号）、删除（先确认）。Markdown 在弹窗里渲染；图片、PDF、文本、音视频由 Node 进程在 `127.0.0.1` 随机端口提供、用随机令牌限定文件，页面以 iframe 预览（除 PDF 外都加 CSP 沙箱）；docx、xlsx 等页面里预览不了的用电脑上的默认应用打开。可让 AI 整理维护。「收集的资料」（`notes.md`）按条显示最新 3 条、其余折叠，可在卡片里直接记一条或删一条（先确认），和伙伴从聊天记进来的走同一个文件。
 - **知识候选**：资料库的「提取知识」新建一个任务，让 AI 核对最近的提交和改动，经 `propose_knowledge` 工具提交值得长期保留的知识（术语、架构、对旧知识的修正，每条带依据）；在别的任务里直接要求提交也走这个工具。候选存在 `.cindy/.knowledge-candidates/`，目录自带 `.gitignore`，不随 git 提交。用户在资料库逐条确认、修改后确认或忽略；确认后才写进 `.cindy/project-knowledge/` 并列入 `TOC.md`（Cindy 只把 TOC.md 的入口告诉新任务，不在索引里基本读不到；没有 TOC.md 时会新建）。修正类要求原文在文件里恰好出现一次，提交后原文变了就不写入。总览卡片显示待确认条数。不会自动提取：每次都消耗模型额度，由用户点按钮发起。用 project-context 生成 TOC.md 的项目，重新生成时会冲掉看板补的索引行。
 - **配置文件**：折叠在资料库底部，查看并可直接编辑 README、AGENTS.md、CLAUDE.md（保存前核对是否被别处改过；软链接写到真实文件；超过 100 KB 只读），也可让 AI 创建或维护；一键在 AGENTS.md 加入「项目资料」入口，并让 CLAUDE.md 通过 `@AGENTS.md` 导入。
+- **公开访问**：在右栏把项目的本地端口临时公开到公网，五种方式可选：Cloudflare 快速隧道（免账号、随机 trycloudflare.com 地址）、Cloudflare 自有域名（`cloudflared tunnel login` 后按子域名建命名隧道和 DNS 记录，地址固定）、Tailscale Funnel（ts.net 地址，最多 3 个项目）、frp 自建服务器（按域名走 http 或按远程端口走 tcp）、SSH 隧道（localhost.run，只用系统自带 ssh）。只用电脑上已装的工具，不下载程序；没装的显示安装命令、官方说明和「让 AI 帮我安装」（在项目里新建任务）。开始前先确认本地端口上有服务，没有就直接提示，不去公开。每条隧道前面挂一个本机反向代理：依次试 `127.0.0.1` 和 `::1`，固定连能通的那个（Cindy 内置的 Node 解析 localhost 时不会两个都试，只监听 `::1` 的开发服务器会连不上）；本地服务是 HTTPS（`vite --https`、mkcert 等）时也用 HTTPS 连，不校验自签证书；把 Host 改成 `localhost:端口`（开发服务器只认它），把指向 localhost 的跳转改回公网地址；本地服务没响应时返回 503 说明页（Cloudflare 会把 502 换成自己的错误页）；默认要求访问口令（随机 10 位，带口令的链接打开一次换成 Cookie，口令不转给项目）。隧道在单独的 Node 进程 `node/tunnel.cjs` 里，有隧道时 `main.js` 每 50 秒问一次状态让它不被空闲回收；Cindy 退出、插件停用时隧道一起关掉，上次被强杀留下的隧道程序下次启动时按进程名收掉。frp 服务器和各项目上次的选择存在本机配置目录（Linux `~/.config/cindy-project-board/`、macOS `~/Library/Application Support/cindy-project-board/`、Windows `%APPDATA%\cindy-project-board\`，文件只许本人读写），不随 git 提交。Cloudflare 自有域名停止后 DNS 记录和隧道留在 Cloudflare，需要时自己删。总览卡片和项目栏标出正在公开的项目。
 - **Git**：当前分支、未提交改动数、最近 5 次提交、其他 worktree，并提示 `.cindy-worktrees/` 未被忽略的风险。
 - **从聊天记录**：伙伴（包括绑定微信的伙伴）可经插件工具把待办写入 `.cindy/todos.md`，把灵感和资料写入 `.cindy/project-knowledge/notes.md`，并能撤销或移动。默认只聊天，明确要求才记，拿不准先回复再问；项目不明确就放进名为「收集箱」的项目。规则写在 `manual/capture/MANUAL.md`。写入不会提交 git。
 - 界面支持简体中文、繁体中文、英文、日文、韩文、西班牙文、法文、德文、葡萄牙文（巴西、葡萄牙），跟随 Cindy 语言；文言文界面回退到简体 / 繁体中文。插件名称与简介受宿主限制只有中、英、日、韩四种。
@@ -29,7 +30,7 @@
 
 - Cindy 插件（`ghost.json` schemaVersion 3，最低 Cindy 0.1.121）
 - 原生 HTML / CSS / JavaScript，无框架、无构建步骤、无第三方依赖
-- Node.js 工作进程（CommonJS，JSON-RPC over stdio，按需启动、空闲 120 秒退出），只用 Node 内置模块和本机 `git`
+- Node.js 工作进程（CommonJS，JSON-RPC over stdio，按需启动、空闲 120 秒退出），只用 Node 内置模块和本机 `git`；公开访问另用本机已装的 `cloudflared` / `tailscale` / `frpc` / `ssh`，在单独的 `node/tunnel.cjs` 进程里运行
 - 宿主能力：`cindy.targets`（项目列表、新建任务）、`cindy.observe`（只读任务列表）、`cindy.node`、`subscribe`（任务事件：turn / session / activity）；`preview.hosts` 声明 `127.0.0.1`，宿主才允许主视图用 iframe 嵌入 Node 进程在本机提供的预览页（Cindy 0.1.121 的回环嵌入）
 
 ## 目录结构
@@ -42,12 +43,14 @@ project-board-plugin/
 ├── main-view.js        # 主视图逻辑：渲染各卡片与项目总览、Markdown、自动刷新、发请求
 ├── main-view-i18n.js   # 主视图界面文案（10 种语言）
 ├── main-view.css       # 主视图样式（适配亮/暗色主题）
+├── node/tunnel.cjs     # 公开访问的 Node 工作进程：检测本机隧道工具，启动 / 停止隧道，本机反向代理（改 Host、访问口令）
 ├── node/worker.cjs     # Node 工作进程：读资料、资料库文件清单、Git 状态与总览摘要，原子写入 .cindy/ 下的资料、AGENTS.md、CLAUDE.md；接收分块上传；保存与确认知识候选；在本机回环地址提供文件预览
 ├── manual/capture/     # 插件手册：伙伴从聊天记待办和资料的规则
 ├── locales/            # 插件名称、描述的多语言（en、zh-CN、ja、ko）
 └── assets/icon.png     # 插件图标
 tests/
 ├── worker.test.cjs     # Node 工作进程测试（node --test）
+├── tunnel.test.cjs     # 公开访问测试：假 ssh 代替隧道，检查访问口令、Host 改写和断开通知
 └── tools.test.cjs      # 插件工具测试：假宿主运行 main.js，连真实工作进程
 ```
 
@@ -70,7 +73,7 @@ tests/
   node --check main.js && node --check main-view.js && node --check main-view-i18n.js
   ```
 
-  界面功能（总览、任务状态、刷新、多语言）靠在 Cindy 里手动验证。
+  界面功能（总览、任务状态、刷新、多语言）靠在 Cindy 里手动验证。`tests/tunnel.test.cjs` 用假 ssh 检查访问口令这道关；各方式对真实服务的连通性（trycloudflare、localhost.run、frps）只能手动试。
 
 - **实测伙伴**：测试消息只写要做的事，不要让伙伴说明自己怎么判断、调用了什么（这类要求曾被模型安全检查以 `reasoning_extraction` 拦下）。工具调用和是否弹确认从聊天记录核对，结果看写入的文件。
 - **伙伴用插件的前提**：宿主不给伙伴注入插件花名册，`whenToUse` 到不了伙伴；宿主还预置了伙伴自己的待办工具，所以「加个待办」默认记到伙伴清单。要让伙伴写进看板，得在伙伴记忆里写明这条规则（宿主允许伙伴的记忆和个人 Skill 细化什么算自己的待办）。
