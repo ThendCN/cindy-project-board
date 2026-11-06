@@ -5,7 +5,8 @@
   "name": "Project Board",
   "description": "See each project's tasks by status, introduction, to-dos, AGENTS.md and other docs plus Git status in one page, plus an overview of all projects. Docs live in the project's .cindy folder, are committed with git, and can be edited directly or generated and updated by AI.",
   "whenToUse": "When the user wants an overview of one or all projects (tasks, intro, to-dos, AGENTS.md / CLAUDE.md, knowledge, Git status), asks to save a to-do, idea or note to a project or the inbox, including from chat channels such as WeChat, or asks to propose lasting project knowledge for review.",
-  "version": "0.6.0",
+  "version": "0.7.0",
+  "releaseNotes": "Compared with the listed 0.5.0: New knowledge candidates: a propose_knowledge tool and an Extract knowledge button let AI suggest lasting project knowledge, which you accept, edit or dismiss in the library before it is written to .cindy/project-knowledge/ and listed in TOC.md; the overview shows how many are waiting. Sessions started from to-dos in a git project now each get their own worktree (.cindy-worktrees/todo-*, branch cindy/todo-*), so several running at once no longer overwrite each other's files; they commit on their branch for you to merge. The new-session dialog warns when a new session would share a folder with unfinished sessions (projects without git, or sessions you write by hand), and updates as their status changes. The Sessions card has a New session button. New to-dos now go above the first group instead of into the wrong group. The plugin now stays running to report session counts to a sidebar status widget; current Cindy releases do not show this widget yet.",
   "entry": "main.js",
   "icon": "assets/icon.png",
   "locales": {
