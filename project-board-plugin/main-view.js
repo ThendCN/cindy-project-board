@@ -1016,17 +1016,11 @@ $('ask').addEventListener('close', async () => {
 });
 
 // ---------- 公开访问：把项目的本地端口映射到公网 ----------
-// 隧道用这台电脑上已装的 cloudflared / tailscale / frpc / ssh 建立（在 node/tunnel.cjs 里）；这里只选方式、填参数、显示地址。
-const SHARE_MODES = [['cloudflare-quick', 'cloudflared'], ['cloudflare', 'cloudflared'], ['tailscale', 'tailscale'], ['frp', 'frpc'], ['ssh', 'ssh']];
+// 隧道用这台电脑上已装的 cloudflared / tailscale 建立（在 node/tunnel.cjs 里）；这里只选方式、填参数、显示地址。
+// 只走 HTTPS 的方式；没装的工具只提示需要用户自己先装好，插件不提供安装。
+const SHARE_MODES = [['cloudflare-quick', 'cloudflared'], ['cloudflare', 'cloudflared'], ['tailscale', 'tailscale']];
 const TOOL_OF = Object.fromEntries(SHARE_MODES);
-// 安装命令不用翻译；没有命令的平台只给官方下载页。
-const INSTALL = {
-  cloudflared: { darwin: 'brew install cloudflared', win32: 'winget install --id Cloudflare.cloudflared', docs: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/' },
-  tailscale: { linux: 'curl -fsSL https://tailscale.com/install.sh | sh', docs: 'https://tailscale.com/download' },
-  frpc: { darwin: 'brew install frpc', docs: 'https://github.com/fatedier/frp/releases' },
-  ssh: { win32: 'Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0', docs: 'https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse' },
-};
-let share = null; // 这台电脑上的隧道 { tunnels, projects, frp, loggingIn }；读不到时为 { error }
+let share = null; // 这台电脑上的隧道 { tunnels, projects, loggingIn }；读不到时为 { error }
 let shareTools = null; // 检测到的工具；null = 需要重新检测
 let shareDraft = null; // 当前项目表单里填的内容；切换项目时清空
 let shareBusy = false;
@@ -1056,7 +1050,7 @@ function h(tag, className, text) {
   return node;
 }
 
-async function copyText(value) {
+async function copyText(value, message = S.share.copied) {
   try {
     await navigator.clipboard.writeText(value);
   } catch {
@@ -1068,7 +1062,7 @@ async function copyText(value) {
     document.execCommand('copy');
     area.remove();
   }
-  toast(S.share.copied);
+  toast(message);
 }
 const openLink = (url) => call('openUrl', { url }).catch((err) => toast(fmt(S.failed, { m: err.message })));
 
@@ -1118,13 +1112,11 @@ function renderTunnel(body, t) {
     link.addEventListener('click', () => openLink(t.url));
     row.append(link, todoButton(S.share.copy, () => copyText(t.url), 'ghost small'));
     body.append(row);
-    if (t.key) {
-      const keyRow = h('div', 'share-key');
-      keyRow.append(h('span', '', fmt(S.share.key, { k: t.key })), todoButton(S.share.copyShare, () => copyText(t.shareUrl), 'ghost small'));
-      body.append(keyRow, h('p', 'meta', S.share.keyHint));
-    } else {
-      body.append(h('p', 'warn', S.share.noKeyWarn));
-    }
+    const codeRow = h('div', 'share-key');
+    codeRow.append(h('span', '', fmt(S.share.code, { c: t.code })), todoButton(S.share.copyCode, () => copyText(t.code), 'ghost small'));
+    const inviteRow = h('div', 'share-acts');
+    inviteRow.append(todoButton(S.share.invite, copyInvite));
+    body.append(codeRow, inviteRow, h('p', 'meta', S.share.accessHint));
     body.append(h('p', 'meta', fmt(S.share.onlineMeta, { port: t.port, mode: mode.name, t: ago(t.startedAt) })));
     if (mode.note) body.append(h('p', 'meta', mode.note));
     acts.append(todoButton(S.share.stop, stopShare));
@@ -1136,7 +1128,7 @@ function renderTunnel(body, t) {
       details.append(h('summary', '', S.share.details), h('pre', '', t.error.message));
       body.append(details);
     }
-    acts.append(todoButton(S.share.dismiss, stopShare), todoButton(S.share.retry, () => startShare(t.mode), 'primary'));
+    acts.append(todoButton(S.share.dismiss, stopShare), todoButton(S.share.retry, () => confirmShare(t.mode, share.projects?.[t.dir]?.port ?? t.port), 'primary'));
   }
   body.append(acts);
 }
@@ -1148,8 +1140,8 @@ function defaultMode() {
 function renderShareForm(body) {
   const saved = share.projects?.[current.id] || {};
   shareDraft ||= {
-    mode: saved.mode || defaultMode(), port: saved.port ? String(saved.port) : '', auth: saved.auth ?? true,
-    hostname: saved.hostname || '', domain: saved.domain || '', remotePort: saved.remotePort ? String(saved.remotePort) : '',
+    mode: TOOL_OF[saved.mode] ? saved.mode : defaultMode(), port: saved.port ? String(saved.port) : '',
+    hostname: saved.hostname || '',
   };
   const d = shareDraft;
   const tool = TOOL_OF[d.mode];
@@ -1165,35 +1157,30 @@ function renderShareForm(body) {
   select.addEventListener('change', () => { d.mode = select.value; renderShare(true); });
   form.append(shareField(S.share.mode, select), h('p', 'meta', S.share.modes[d.mode].hint));
 
-  if (!info?.installed) return renderInstall(form, tool);
-  if (info.tooOld) form.append(h('p', 'warn', fmt(S.share.frpTooOld, { v: info.version })));
+  if (!info?.installed) {
+    const acts = h('div', 'share-acts');
+    acts.append(todoButton(S.share.recheck, () => loadShare(true)));
+    form.append(h('p', 'warn', fmt(S.share.notInstalled, { t: tool })), acts);
+    return;
+  }
 
-  const start = todoButton(shareBusy ? S.share.startingShort : S.share.start, () => startShare(d.mode), 'primary');
+  const start = todoButton(shareBusy ? S.share.startingShort : S.share.start, () => confirmShare(d.mode, d.port), 'primary');
   const ready = () => {
     const port = Number(d.port);
-    let ok = Number.isInteger(port) && port > 0 && port < 65536 && !info.tooOld;
+    let ok = Number.isInteger(port) && port > 0 && port < 65536;
     if (d.mode === 'cloudflare') ok &&= shareTools.cloudflared.loggedIn && Boolean(d.hostname.trim());
-    if (d.mode === 'frp') ok &&= Boolean(share.frp) && Boolean(d.domain.trim() || d.remotePort.trim());
     if (d.mode === 'tailscale') ok &&= shareTools.tailscale.running;
     start.disabled = shareBusy || !ok;
   };
   form.append(shareField(S.share.port, draftInput('port', { type: 'number', placeholder: '5173', onInput: ready })));
 
   if (d.mode === 'cloudflare') renderCloudflare(form, ready);
-  if (d.mode === 'frp') renderFrp(form, ready);
   if (d.mode === 'tailscale') {
     form.append(shareTools.tailscale.running
       ? h('p', 'meta', fmt(S.share.tsHost, { h: shareTools.tailscale.host || '' }))
       : h('p', 'warn', S.share.tsNotRunning));
   }
 
-  const auth = h('label', 'share-check');
-  const box = h('input');
-  box.type = 'checkbox';
-  box.checked = d.auth;
-  box.addEventListener('change', () => { d.auth = box.checked; });
-  auth.append(box, h('span', '', S.share.auth));
-  form.append(auth);
   const acts = h('div', 'actions');
   acts.append(start);
   form.append(acts);
@@ -1214,52 +1201,25 @@ function renderCloudflare(form, ready) {
   form.append(acts);
 }
 
-function renderFrp(form, ready) {
-  if (!share.frp || shareDraft.frpEditing) {
-    shareDraft.frpAddr ??= share.frp?.serverAddr || '';
-    shareDraft.frpPort ??= String(share.frp?.serverPort || 7000);
-    shareDraft.frpToken ??= '';
-    const box = h('div', 'share-server');
-    box.append(
-      h('p', 'meta', S.share.frpServerHint),
-      shareField(S.share.frpAddr, draftInput('frpAddr', { placeholder: 'frp.example.com' })),
-      shareField(S.share.frpPort, draftInput('frpPort', { type: 'number', placeholder: '7000' })),
-      shareField(S.share.frpToken, draftInput('frpToken', { type: 'password', placeholder: share.frp?.hasToken ? S.share.frpTokenKeep : '' })),
-    );
-    const acts = h('div', 'share-acts');
-    if (share.frp) acts.append(todoButton(S.cancel, () => { shareDraft.frpEditing = false; renderShare(true); }));
-    acts.append(todoButton(S.save, saveFrp));
-    box.append(acts);
-    form.append(box);
-    return;
-  }
-  const server = h('div', 'share-acts');
-  server.append(h('span', 'meta', fmt(S.share.frpServer, { s: `${share.frp.serverAddr}:${share.frp.serverPort}` })),
-    todoButton(S.edit, () => { shareDraft.frpEditing = true; renderShare(true); }, 'ghost small'));
-  form.append(server,
-    shareField(S.share.frpDomain, draftInput('domain', { placeholder: 'demo.example.com', onInput: ready })),
-    shareField(S.share.frpRemotePort, draftInput('remotePort', { type: 'number', placeholder: '6000', onInput: ready })),
-    h('p', 'meta', S.share.frpTargetHint));
+// 公开前说清楚公开的是什么、有什么风险，用户勾选确认后才开始。
+function confirmShare(mode, port) {
+  $('share-confirm-title').textContent = fmt(S.share.confirmTitle, { port });
+  $('share-confirm-body').replaceChildren(...S.share.confirmPoints.map((point) => h('li', '', fmt(point, { port, via: S.share.modes[mode].via }))));
+  $('share-confirm-check').checked = false;
+  $('share-confirm-ok').disabled = true;
+  $('share-confirm').onclose = () => {
+    if ($('share-confirm').returnValue === 'ok' && $('share-confirm-check').checked) startShare(mode);
+  };
+  $('share-confirm').showModal();
 }
 
-function renderInstall(form, tool) {
-  const platform = shareTools.platform;
-  const command = INSTALL[tool][platform];
-  const name = tool === 'frpc' ? 'frp (frpc)' : tool;
-  form.append(h('p', 'warn', fmt(S.share.notInstalled, { t: name })));
-  if (command) {
-    const pre = h('pre', 'share-cmd', command);
-    form.append(pre);
+async function copyInvite() {
+  try {
+    const { url } = await call('tunnelInvite', { dir: current.id });
+    await copyText(url, S.share.inviteCopied);
+  } catch (err) {
+    toast(S.share.errors[err.code] || fmt(S.failed, { m: err.message }));
   }
-  if (tool === 'ssh' && platform !== 'win32') form.append(h('p', 'meta', S.share.sshBuiltIn));
-  const acts = h('div', 'share-acts');
-  if (command) acts.append(todoButton(S.share.copy, () => copyText(command), 'ghost small'));
-  acts.append(
-    todoButton(S.share.installDocs, () => openLink(INSTALL[tool].docs)),
-    todoButton(S.share.installAi, () => openAsk({ heading: S.share.installHeading, title: fmt(S.share.installTitle, { t: name }), text: fmt(S.share.installPrompt, { t: name, os: platform }) }), 'ai'),
-    todoButton(S.share.recheck, () => loadShare(true)),
-  );
-  form.append(acts);
 }
 
 async function cloudflareLogin() {
@@ -1275,19 +1235,6 @@ async function cloudflareLogin() {
   await loadShare(true);
 }
 
-async function saveFrp() {
-  const d = shareDraft;
-  try {
-    await call('tunnelSaveFrp', { serverAddr: d.frpAddr, serverPort: d.frpPort, token: d.frpToken || undefined });
-    d.frpEditing = false;
-    d.frpToken = '';
-    toast(S.share.frpSaved);
-  } catch (err) {
-    toast(S.share.errors[err.code] || fmt(S.failed, { m: err.message }));
-  }
-  await loadShare(false);
-}
-
 async function startShare(mode) {
   const dir = current.id;
   const saved = share.projects?.[dir] || {};
@@ -1297,8 +1244,7 @@ async function startShare(mode) {
   renderShare(true);
   try {
     const res = await call('tunnelStart', {
-      dir, mode, port: Number(d.port), auth: d.auth ?? true,
-      hostname: d.hostname?.trim() || undefined, domain: d.domain?.trim() || undefined, remotePort: d.remotePort ? Number(d.remotePort) : undefined,
+      dir, mode, port: Number(d.port), hostname: d.hostname?.trim() || undefined,
     });
     if (res.state === 'online') toast(S.share.started);
   } catch (err) {
@@ -1526,6 +1472,7 @@ async function init() {
   $('todo-select').addEventListener('click', toggleSelecting);
   $('todo-select-task').addEventListener('click', askForSelected);
   $('refresh').addEventListener('click', () => load());
+  $('share-confirm-check').addEventListener('change', () => { $('share-confirm-ok').disabled = !$('share-confirm-check').checked; });
 
   try {
     projects = await call('projects');

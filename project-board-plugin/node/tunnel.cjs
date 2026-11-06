@@ -1,5 +1,5 @@
 'use strict';
-// 项目看板「公开访问」工作进程：用本机已装的 cloudflared / tailscale / frpc / ssh，把项目的本地端口映射到公网。
+// 项目看板「公开访问」工作进程：用本机已装的 cloudflared / tailscale，把项目的本地端口映射到公网（只走 HTTPS）。
 // 和 worker.cjs 分开：那个进程空闲 120 秒就被宿主回收，隧道要一直开着；有隧道时 main.js 定时来 tunnel/list 保活。
 // 每条隧道前面挂一个本机反向代理：把 Host 改回 localhost（开发服务器只认它），按需要求访问口令。
 // 不下载、不安装任何程序；找不到工具就报告未安装，由看板引导用户自己装。
@@ -12,9 +12,9 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 const { execFile, execFileSync, spawn } = require('node:child_process');
-const { createHash, randomInt, timingSafeEqual } = require('node:crypto');
+const { createHash, randomBytes, randomInt, timingSafeEqual } = require('node:crypto');
 
-// 设置和在跑的进程号存在本机配置目录，不进项目、不随 git 提交（frp 的 token 也在这里，文件只许本人读写）。
+// 设置和在跑的进程号存在本机配置目录，不进项目、不随 git 提交，文件只许本人读写。
 function stateDir() {
   if (process.env.PROJECT_BOARD_STATE_DIR) return process.env.PROJECT_BOARD_STATE_DIR; // 测试用
   const home = os.homedir();
@@ -30,13 +30,9 @@ const MODES = {
   'cloudflare-quick': 'cloudflared',
   cloudflare: 'cloudflared',
   tailscale: 'tailscale',
-  frp: 'frpc',
-  ssh: 'ssh',
 };
 const READY_TIMEOUT_MS = 40000;
 const TAILSCALE_PORTS = [443, 8443, 10000]; // Funnel 只开放这三个端口
-const KEY_PARAM = 'cindy_key';
-const COOKIE = 'cindy_board_access';
 const KEY_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
@@ -80,8 +76,6 @@ function extraDirs(tool) {
     return {
       cloudflared: [path.join(pf86, 'cloudflared'), path.join(pf, 'cloudflared')],
       tailscale: [path.join(pf, 'Tailscale')],
-      frpc: [path.join(pf, 'frp')],
-      ssh: [path.join(windir, 'System32', 'OpenSSH')],
     }[tool];
   }
   return ['/usr/local/bin', '/usr/bin', path.join(os.homedir(), '.local', 'bin')];
@@ -143,7 +137,7 @@ const cloudflaredCert = () => process.env.TUNNEL_ORIGIN_CERT || path.join(os.hom
 const exists = (file) => fs.access(file).then(() => true, () => false);
 
 async function detectTools() {
-  const [cloudflared, tailscale, frpc, ssh] = await Promise.all(['cloudflared', 'tailscale', 'frpc', 'ssh'].map(findTool));
+  const [cloudflared, tailscale] = await Promise.all(['cloudflared', 'tailscale'].map(findTool));
   const tools = { platform: process.platform };
   tools.cloudflared = { installed: Boolean(cloudflared) };
   if (cloudflared) {
@@ -159,21 +153,25 @@ async function detectTools() {
     tools.tailscale.running = parsed?.BackendState === 'Running';
     tools.tailscale.host = parsed?.Self?.DNSName?.replace(/\.$/, '') || null;
   }
-  tools.frpc = { installed: Boolean(frpc) };
-  if (frpc) {
-    const version = /(\d+)\.(\d+)\.(\d+)/.exec((await run(frpc, ['-v'])).out);
-    tools.frpc.version = version?.[0] ?? null;
-    // 0.52 起才认 TOML 配置文件
-    tools.frpc.tooOld = Boolean(version) && Number(version[1]) === 0 && Number(version[2]) < 52;
-  }
-  tools.ssh = { installed: Boolean(ssh) };
   return tools;
 }
 
-// ---------- 本机反向代理：改 Host、可选访问口令 ----------
-function makeKey() {
+// ---------- 本机反向代理：只走 HTTPS、访问口令换会话、改 Host ----------
+// 口令只在登录页里用 POST 提交，不进 URL；登录后发一个随机会话 ID（不是口令本身）放进 Cookie。
+// 分享用一次性链接：1 小时内有效、打开一次就作废。停止公开时口令、会话、链接全部作废。
+const LOGIN_PATH = '/__cindy_board/login';
+const INVITE_PARAM = 'cindy_invite';
+const SESSION_COOKIE = '__Host-cindy_board_session'; // __Host- 前缀：浏览器只接受 Secure、Path=/、不带 Domain 的写法
+const SESSION_MS = 12 * 60 * 60 * 1000;
+const INVITE_MS = 60 * 60 * 1000;
+const LOGIN_WINDOW_MS = 60 * 1000;
+const LOGIN_MAX_FAILURES = 10; // 一分钟内输错这么多次就暂停登录，防止猜口令
+const HSTS = { 'Strict-Transport-Security': 'max-age=86400' };
+
+function makeCode() {
   return Array.from({ length: 10 }, () => KEY_CHARS[randomInt(KEY_CHARS.length)]).join('');
 }
+const randomToken = () => randomBytes(32).toString('base64url');
 
 function cookieValue(header, name) {
   for (const part of String(header || '').split(';')) {
@@ -185,16 +183,52 @@ function cookieValue(header, name) {
 function withoutCookie(header, name) {
   return String(header).split(';').map((p) => p.trim()).filter((p) => p && !p.startsWith(`${name}=`)).join('; ');
 }
-function sameKey(given, key) {
+function sameSecret(given, secret) {
   const a = Buffer.from(String(given ?? ''));
-  const b = Buffer.from(key);
+  const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
 }
-const authorized = (tunnel, req) => !tunnel.key || sameKey(cookieValue(req.headers.cookie, COOKIE), tunnel.key);
+const escAttr = (value) => String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+// 登录后跳回的地址只认本站路径，不能借它跳到别的网站。
+const safeNext = (value) => (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.startsWith('/\\') ? value : '/');
+
+// 访客实际用的协议。Cloudflare 会如实标明 http / https，明文的跳到 HTTPS；
+// Tailscale Funnel 只开放 HTTPS 端口，不看转发头（转发方可能把它改写成 http，照着跳会死循环）。
+function visitorProto(tunnel, req) {
+  if (tunnel.mode === 'tailscale') return 'https';
+  return req.headers['x-forwarded-proto'] === 'http' ? 'http' : 'https';
+}
+
+function hasSession(tunnel, req) {
+  const id = cookieValue(req.headers.cookie, SESSION_COOKIE);
+  const expires = id ? tunnel.sessions.get(id) : undefined;
+  if (!expires) return false;
+  if (expires > Date.now()) return true;
+  tunnel.sessions.delete(id);
+  return false;
+}
+
+function startSession(tunnel, res, next) {
+  const id = randomToken();
+  tunnel.sessions.set(id, Date.now() + SESSION_MS);
+  res.writeHead(303, {
+    ...HSTS,
+    Location: next,
+    'Set-Cookie': `${SESSION_COOKIE}=${id}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MS / 1000}`,
+    'Cache-Control': 'no-store',
+  });
+  res.end();
+}
+
+function lockedOut(tunnel) {
+  const since = Date.now() - LOGIN_WINDOW_MS;
+  tunnel.failures = tunnel.failures.filter((t) => t > since);
+  return tunnel.failures.length >= LOGIN_MAX_FAILURES;
+}
 
 // 访客看到的页面：不知道对方语言，中英文都写。
 function page(res, status, title, body) {
-  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+  res.writeHead(status, { ...HSTS, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
   res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
 <style>body{font:15px/1.6 system-ui,sans-serif;max-width:360px;margin:18vh auto;padding:0 20px;color:#222;background:#fafafa}
 @media(prefers-color-scheme:dark){body{color:#eee;background:#1b1b1b}input{background:#2a2a2a;color:#eee;border-color:#555}}
@@ -202,10 +236,38 @@ h1{font-size:18px}input{width:100%;box-sizing:border-box;padding:8px 10px;border
 button{margin-top:10px;padding:8px 16px;border:0;border-radius:6px;background:#2f6fde;color:#fff;font:inherit}.err{color:#c33}</style>${body}`);
 }
 
-function loginPage(res, wrong) {
-  page(res, 401, 'Access code', `<h1>需要访问口令 · Access code required</h1>
-${wrong ? '<p class="err">口令不对 · Wrong code</p>' : '<p>向分享链接给你的人要访问口令。<br>Ask the person who shared this link for the code.</p>'}
-<form method="get"><input name="${KEY_PARAM}" type="password" autocomplete="off" autofocus><button>进入 · Enter</button></form>`);
+const LOGIN_NOTES = {
+  ask: '<p>向分享给你的人要访问口令。<br>Ask the person who shared this page for the access code.</p>',
+  wrong: '<p class="err">口令不对。<br>Wrong access code.</p>',
+  invite: '<p class="err">这个一次性链接已用过或已过期，请输入访问口令。<br>This one-time link was already used or has expired. Enter the access code.</p>',
+  locked: '<p class="err">尝试次数太多，请一分钟后再试。<br>Too many attempts. Try again in a minute.</p>',
+};
+function loginPage(res, next, note, status = 401) {
+  page(res, status, 'Access code', `<h1>需要访问口令 · Access code required</h1>${LOGIN_NOTES[note]}
+<form method="post" action="${LOGIN_PATH}"><input type="hidden" name="next" value="${escAttr(next)}"><input name="code" type="password" autocomplete="off" required autofocus><button>进入 · Enter</button></form>`);
+}
+
+function handleLogin(tunnel, req, res) {
+  if (req.method !== 'POST') {
+    res.writeHead(303, { ...HSTS, Location: '/' });
+    return res.end();
+  }
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => {
+    body += chunk;
+    if (body.length > 4096) req.destroy();
+  });
+  req.on('end', () => {
+    const form = new URLSearchParams(body);
+    const next = safeNext(form.get('next'));
+    if (lockedOut(tunnel)) return loginPage(res, next, 'locked', 429);
+    if (!sameSecret(form.get('code'), tunnel.code)) {
+      tunnel.failures.push(Date.now());
+      return loginPage(res, next, 'wrong');
+    }
+    startSession(tunnel, res, next);
+  });
 }
 
 function forwardHeaders(tunnel, req) {
@@ -214,40 +276,46 @@ function forwardHeaders(tunnel, req) {
   const publicHost = req.headers.host || '';
   headers.host = local;
   headers['x-forwarded-host'] = publicHost;
-  headers['x-forwarded-proto'] = req.headers['x-forwarded-proto'] || tunnel.scheme;
+  headers['x-forwarded-proto'] = 'https';
   // 浏览器发来的 Origin 是公网地址；改成本地地址，开发服务器的同源检查和 Host 才对得上。
   try {
     if (headers.origin && new URL(headers.origin).host === publicHost) headers.origin = `${tunnel.localTls ? 'https' : 'http'}://${local}`;
   } catch {
     // Origin 不是 URL（如 "null"），原样转发
   }
+  // 会话 Cookie 只给看板自己用，不转给项目。
   if (headers.cookie) {
-    headers.cookie = withoutCookie(headers.cookie, COOKIE);
+    headers.cookie = withoutCookie(headers.cookie, SESSION_COOKIE);
     if (!headers.cookie) delete headers.cookie;
   }
   return headers;
 }
 
 function handle(tunnel, req, res) {
-  const url = new URL(req.url, 'http://local');
-  if (tunnel.key && url.searchParams.has(KEY_PARAM)) {
-    if (!sameKey(url.searchParams.get(KEY_PARAM), tunnel.key)) return loginPage(res, true);
-    // 带口令的链接打开一次就记进 Cookie，再跳到去掉口令的地址，口令不留在地址栏和历史里。
-    url.searchParams.delete(KEY_PARAM);
-    res.writeHead(302, {
-      Location: url.pathname + url.search,
-      'Set-Cookie': `${COOKIE}=${tunnel.key}; Path=/; HttpOnly; SameSite=Lax`,
-      'Cache-Control': 'no-store',
-    });
+  if (visitorProto(tunnel, req) === 'http') {
+    res.writeHead(308, { Location: `https://${req.headers.host}${req.url}` });
     return res.end();
   }
-  if (!authorized(tunnel, req)) return loginPage(res, false);
+  const url = new URL(req.url, 'https://local');
+  if (url.pathname === LOGIN_PATH) return handleLogin(tunnel, req, res);
+  if (url.searchParams.has(INVITE_PARAM)) {
+    // 一次性链接：不论成败都作废，打开后跳到去掉链接参数的地址。
+    const token = url.searchParams.get(INVITE_PARAM);
+    const expires = tunnel.invites.get(token);
+    tunnel.invites.delete(token);
+    url.searchParams.delete(INVITE_PARAM);
+    const next = url.pathname + url.search;
+    if (expires > Date.now()) return startSession(tunnel, res, next);
+    tunnel.failures.push(Date.now());
+    return loginPage(res, next, 'invite');
+  }
+  if (!hasSession(tunnel, req)) return loginPage(res, req.url, 'ask');
   const options = { host: tunnel.localHost, port: tunnel.port, method: req.method, path: req.url, headers: forwardHeaders(tunnel, req) };
   const upstream = (tunnel.localTls ? https : http).request(tunnel.localTls ? { ...options, ...LOCAL_TLS } : options, (up) => {
-    const headers = { ...up.headers };
+    const headers = { ...up.headers, ...HSTS };
     // 应用跳转到 http://localhost:端口/... 时改回公网地址，访客才跳得过去。
     const location = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)(.*)$/i.exec(headers.location || '');
-    if (location && Number(location[1]) === tunnel.port) headers.location = `${req.headers['x-forwarded-proto'] || tunnel.scheme}://${req.headers.host}${location[2]}`;
+    if (location && Number(location[1]) === tunnel.port) headers.location = `https://${req.headers.host}${location[2]}`;
     res.writeHead(up.statusCode, up.statusMessage, headers);
     up.pipe(res);
   });
@@ -261,7 +329,7 @@ function handle(tunnel, req, res) {
 
 // WebSocket（开发服务器的热更新等）：鉴权后原样双向转发。
 function upgrade(tunnel, req, socket, head) {
-  if (!authorized(tunnel, req)) {
+  if (visitorProto(tunnel, req) !== 'https' || !hasSession(tunnel, req)) {
     socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
     return;
   }
@@ -349,56 +417,6 @@ const PLANS = {
       cleanup: () => run(bin, ['serve', `--https=${port}`, 'off'], 8000),
     };
   },
-  frp: async (bin, tunnel, options) => {
-    const server = (await readSettings()).frp;
-    if (!server?.serverAddr) throw codeError('FRP_SETUP');
-    const q = JSON.stringify; // JSON 字符串是合法的 TOML 基本字符串
-    const lines = [
-      `serverAddr = ${q(server.serverAddr)}`,
-      `serverPort = ${Number(server.serverPort) || 7000}`,
-      'loginFailExit = true',
-      'log.disablePrintColor = true',
-      ...(server.token ? [`auth.token = ${q(server.token)}`] : []),
-      '',
-      '[[proxies]]',
-      `name = ${q(`cindy-board-${shortHash(tunnel.dir)}`)}`,
-      'localIP = "127.0.0.1"',
-      `localPort = ${tunnel.proxyPort}`,
-    ];
-    let url;
-    if (options.domain) {
-      const domain = /^(https?:\/\/)?([^/:\s]+)\/?$/i.exec(options.domain.trim());
-      if (!domain || !HOSTNAME.test(domain[2])) throw codeError('BAD_HOSTNAME');
-      lines.push('type = "http"', `customDomains = [${q(domain[2])}]`);
-      // 服务器前面另有 HTTPS 时用户会填 https://，地址照着显示。
-      url = `${(domain[1] || 'http://').toLowerCase()}${domain[2]}`;
-    } else {
-      const remotePort = Number(options.remotePort);
-      if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) throw codeError('BAD_PORT');
-      lines.push('type = "tcp"', `remotePort = ${remotePort}`);
-      url = `http://${server.serverAddr}:${remotePort}`;
-    }
-    const config = path.join(STATE, `frpc-${shortHash(tunnel.dir)}.toml`);
-    await writePrivate(config, lines.join('\n') + '\n');
-    tunnel.scheme = url.startsWith('https') ? 'https' : 'http';
-    return {
-      args: ['-c', config],
-      url,
-      ready: /start proxy success/i,
-      fail: /login to the server failed[^\n]*|start error[^\n]*|already exists[^\n]*/i,
-      cleanup: () => fs.rm(config, { force: true }),
-    };
-  },
-  ssh: (bin, tunnel) => ({
-    // localhost.run 免注册：不发本机密钥（nokey），known_hosts 单独存，不动用户自己的。
-    args: ['-T', '-o', 'BatchMode=yes', '-o', 'PubkeyAuthentication=no', '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', `UserKnownHostsFile=${path.join(STATE, 'known_hosts')}`, '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
-      '-o', 'ExitOnForwardFailure=yes', '-R', `80:127.0.0.1:${tunnel.proxyPort}`, 'nokey@localhost.run'],
-    urlFrom: /tunneled with tls termination, (https:\/\/\S+)/,
-    ready: /tunneled with tls termination/,
-    // 只认 ssh 自己的报错（「ssh: …」「…: Permission denied (…)」）；localhost.run 的欢迎文字里也提到 permission denied。
-    fail: /^ssh: .*|Permission denied \(.*/,
-  }),
 };
 
 // ---------- 隧道生命周期 ----------
@@ -407,8 +425,7 @@ let login = null; // 正在进行的 cloudflared tunnel login
 
 function publicTunnel(t) {
   return {
-    dir: t.dir, mode: t.mode, port: t.port, state: t.state, url: t.url, key: t.key,
-    shareUrl: t.url && t.key ? `${t.url.replace(/\/$/, '')}/?${KEY_PARAM}=${t.key}` : t.url,
+    dir: t.dir, mode: t.mode, port: t.port, state: t.state, url: t.url, code: t.code,
     error: t.error, startedAt: t.startedAt,
   };
 }
@@ -488,7 +505,7 @@ function stopProcess(tunnel) {
   setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }, 3000).unref();
 }
 
-async function start({ dir, mode, port, auth, hostname, domain, remotePort }) {
+async function start({ dir, mode, port, hostname }) {
   if (!MODES[mode]) throw codeError('BAD_MODE');
   port = Number(port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw codeError('BAD_PORT');
@@ -502,11 +519,11 @@ async function start({ dir, mode, port, auth, hostname, domain, remotePort }) {
 
   // 先记下这个项目的选择，下次打开直接填好。
   const settings = await readSettings();
-  settings.projects = { ...settings.projects, [dir]: { mode, port, auth: Boolean(auth), hostname, domain, remotePort } };
+  settings.projects = { ...settings.projects, [dir]: { mode, port, hostname } };
   await writeSettings(settings);
 
   const tunnel = {
-    dir, mode, port, localHost, localTls, bin, key: auth ? makeKey() : null, scheme: 'https',
+    dir, mode, port, localHost, localTls, bin, code: makeCode(), sessions: new Map(), invites: new Map(), failures: [],
     state: 'starting', url: null, error: null, log: [], startedAt: Date.now(),
   };
   tunnels.set(dir, tunnel);
@@ -514,7 +531,7 @@ async function start({ dir, mode, port, auth, hostname, domain, remotePort }) {
   try {
     tunnel.proxy = await startProxy(tunnel);
     tunnel.proxyPort = tunnel.proxy.address().port;
-    const plan = await PLANS[mode](bin, tunnel, { hostname, domain, remotePort });
+    const plan = await PLANS[mode](bin, tunnel, { hostname });
     if (plan.url) tunnel.url = plan.url;
     tunnel.cleanup = plan.cleanup;
     if (tunnels.get(dir) !== tunnel) throw codeError('CANCELLED');
@@ -545,7 +562,7 @@ async function start({ dir, mode, port, auth, hostname, domain, remotePort }) {
     });
   } catch (err) {
     tunnel.proxy?.close();
-    // 准备期间被停止（如 frp 配置已写好）时也要收尾
+    // 准备期间被停止时也要收尾
     await Promise.resolve(tunnel.cleanup?.()).catch(() => {});
     tunnel.cleanup = null;
     if (tunnels.get(dir) === tunnel) settle(tunnel, 'error', { code: err.code || 'TOOL_FAILED', message: err.message });
@@ -571,27 +588,24 @@ async function stop({ dir }) {
   return { ok: true };
 }
 
+// 一次性分享链接：1 小时内有效，打开一次就作废；访客打开后在那台设备上保持登录（同口令登录）。
+function invite({ dir }) {
+  const tunnel = tunnels.get(dir);
+  if (tunnel?.state !== 'online') throw codeError('NOT_ONLINE');
+  const now = Date.now();
+  for (const [token, expires] of tunnel.invites) if (expires < now) tunnel.invites.delete(token);
+  const token = randomToken();
+  tunnel.invites.set(token, now + INVITE_MS);
+  return { url: `${tunnel.url}/?${INVITE_PARAM}=${token}`, expiresAt: now + INVITE_MS };
+}
+
 async function list() {
   const settings = await readSettings();
   return {
     tunnels: [...tunnels.values()].map(publicTunnel),
     loggingIn: Boolean(login),
     projects: settings.projects || {},
-    frp: settings.frp ? { serverAddr: settings.frp.serverAddr, serverPort: settings.frp.serverPort, hasToken: Boolean(settings.frp.token) } : null,
   };
-}
-
-async function saveFrp({ serverAddr, serverPort, token }) {
-  const addr = String(serverAddr || '').trim();
-  const portNumber = Number(serverPort || 7000);
-  if (!/^[a-z0-9.:[\]-]{1,253}$/i.test(addr)) throw codeError('BAD_HOSTNAME');
-  if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) throw codeError('BAD_PORT');
-  const settings = await readSettings();
-  // token 不传表示不改；传空字符串表示清掉。
-  const keep = token === undefined ? settings.frp?.token : String(token);
-  settings.frp = { serverAddr: addr, serverPort: portNumber, ...(keep ? { token: keep } : {}) };
-  await writeSettings(settings);
-  return list();
 }
 
 // cloudflared 会自己打开默认浏览器（用的是用户平时的浏览器和登录状态）；链接也交给看板显示，打不开时可以手动点。
@@ -650,11 +664,11 @@ const METHODS = {
   'tunnel/list': list,
   'tunnel/start': start,
   'tunnel/stop': stop,
-  'tunnel/save-frp': saveFrp,
+  'tunnel/invite': invite,
   'tunnel/cloudflare-login': cloudflareLogin,
   'tunnel/open-url': openUrl,
 };
-const NEEDS_DIR = new Set(['tunnel/start', 'tunnel/stop']);
+const NEEDS_DIR = new Set(['tunnel/start', 'tunnel/stop', 'tunnel/invite']);
 
 // 宿主停进程时先发 SIGTERM（关 stdin），给 2 秒收尾：把隧道程序一起关掉，不留在后台继续对外开放。
 function shutdown() {

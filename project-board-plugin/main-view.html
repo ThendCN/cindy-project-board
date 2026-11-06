@@ -96,6 +96,17 @@
       <div id="viewer-actions" class="actions"></div>
     </form>
   </dialog>
+  <dialog id="share-confirm">
+    <form method="dialog" class="dialog">
+      <h3 id="share-confirm-title"></h3>
+      <ul id="share-confirm-body" class="share-risks"></ul>
+      <label class="share-check"><input id="share-confirm-check" type="checkbox"><span data-t="shareConfirmCheck"></span></label>
+      <div class="actions">
+        <button value="cancel" class="ghost" data-t="cancel"></button>
+        <button id="share-confirm-ok" value="ok" class="primary" data-t="shareConfirmOk"></button>
+      </div>
+    </form>
+  </dialog>
   <div id="toast" class="toast" hidden></div>
   <script src="main-view-i18n.js"></script>
   <script src="main-view.js"></script>

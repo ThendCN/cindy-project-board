@@ -176,11 +176,10 @@ dialog.wide { width: min(880px, 94vw); }
 .share-field select { border-radius: 9999px; padding: 5px 12px; }
 .share-check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .share-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.share-server { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
 .share-url, .share-key { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .share-link { flex: 1; min-width: 0; border: 0; border-radius: 6px; padding: 2px 4px; background: none; text-align: left; font-weight: 600; text-decoration: underline; overflow-wrap: anywhere; }
 .share-key span { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; }
-.share-cmd { margin: 0; background: var(--hover); border-radius: 8px; padding: 6px 10px; font: 12px ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.share-risks { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .share-log summary { color: var(--muted); font-size: 12px; cursor: pointer; }
 .share-log pre { margin: 4px 0 0; max-height: 160px; overflow: auto; background: var(--hover); border-radius: 8px; padding: 6px 10px; font: 11px ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dot.public { color: var(--warning-fg, #c27c0e); }

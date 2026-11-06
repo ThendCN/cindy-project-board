@@ -106,7 +106,7 @@ const OPS = {
   tunnelStart,
   // 停止不核对项目：项目刚从 Cindy 移除时也要能关掉它的隧道。
   tunnelStop: ({ dir }) => tunnel('tunnel/stop', { dir }, 20000).then(async (r) => { await tunnelList(); return r; }),
-  tunnelSaveFrp: (args) => tunnel('tunnel/save-frp', args),
+  tunnelInvite: ({ dir }) => tunnel('tunnel/invite', { dir }),
   tunnelLogin,
   openUrl: ({ url }) => tunnel('tunnel/open-url', { url }),
 };
