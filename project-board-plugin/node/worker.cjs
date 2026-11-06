@@ -27,6 +27,9 @@ const TOC_NAME = 'TOC.md';
 const CANDIDATES_DIR = '.cindy/.knowledge-candidates';
 const CANDIDATES_FILE = `${CANDIDATES_DIR}/candidates.json`;
 const CANDIDATE_KINDS = new Set(['term', 'architecture', 'correction']);
+// 和 Cindy 自己建的 worktree 放在同一目录、同一分支前缀（cindy/）。宿主只回收自己登记过的 worktree，不会动这些。
+const WORKTREES_DIR = '.cindy-worktrees';
+const WORKTREE_NAME = /^todo-[0-9a-f]{8}$/;
 // 候选的目标文件：不带空格和括号，才能直接写进 TOC.md 的链接。
 const CANDIDATE_NAME = /^[^\s./\\()<>][^\s/\\()<>\x00-\x1f]*\.md$/i;
 const MAX_UPLOAD = 50 * 1024 * 1024;
@@ -138,6 +141,46 @@ async function gitStatus(dir) {
     worktrees: worktreeList,
     cindyWorktreesUnignored,
   };
+}
+
+// 和 git() 不同：失败时带上 git 的报错，时间也放宽（大仓库检出文件慢）。
+function gitOrThrow(dir, args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd: dir, timeout: 25000, windowsHide: true },
+      (err, stdout, stderr) => (err ? reject(new Error(stderr.trim() || err.message)) : resolve(stdout.trim())));
+  });
+}
+
+// 和宿主一样写进 .git/info/exclude，不改项目的 .gitignore。写不进去只影响 git status 干不干净，不算失败。
+async function excludeWorktreesDir(root) {
+  if ((await git(root, ['check-ignore', '-q', `${WORKTREES_DIR}/`])) !== null) return;
+  const file = path.resolve(root, await git(root, ['rev-parse', '--git-path', 'info/exclude']));
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const content = await readOrEmpty(file);
+  await fs.appendFile(file, `${content && !content.endsWith('\n') ? '\n' : ''}/${WORKTREES_DIR}/\n`);
+}
+
+/** 给从待办开始的任务建独立 worktree，同时运行的任务互不踩文件。不是 git 仓库或还没有提交时返回 null。 */
+async function createWorktree({ dir }) {
+  const root = await git(dir, ['rev-parse', '--show-toplevel']);
+  if (!root || (await git(dir, ['rev-parse', '--verify', '-q', 'HEAD'])) === null) return null;
+  const prefix = await git(dir, ['rev-parse', '--show-prefix']);
+  await excludeWorktreesDir(root).catch(() => {});
+  const name = `todo-${randomBytes(4).toString('hex')}`;
+  const branch = `cindy/${name}`;
+  const worktree = path.join(root, WORKTREES_DIR, name);
+  await gitOrThrow(root, ['worktree', 'add', '-q', '-b', branch, worktree, 'HEAD']);
+  return { name, branch, path: path.resolve(worktree, prefix) };
+}
+
+/** 任务没发出去时撤掉刚建的 worktree。不加 --force、用 -d：里面有改动或分支有新提交时 git 会拒绝，不丢东西。 */
+async function removeWorktree({ dir, name }) {
+  if (!WORKTREE_NAME.test(name)) throw new Error('invalid worktree name');
+  const root = await git(dir, ['rev-parse', '--show-toplevel']);
+  if (!root) throw new Error('not a git repository');
+  await gitOrThrow(root, ['worktree', 'remove', path.join(root, WORKTREES_DIR, name)]);
+  await gitOrThrow(root, ['branch', '-d', `cindy/${name}`]);
+  return { ok: true };
 }
 
 /** 总览卡片用的轻量摘要：只读待办计数与分支、未提交改动数。 */
@@ -684,6 +727,8 @@ const METHODS = {
   'project/propose-knowledge': serialized(proposeKnowledge),
   'project/accept-candidate': serialized(acceptCandidate),
   'project/reject-candidate': serialized(rejectCandidate),
+  'project/create-worktree': serialized(createWorktree),
+  'project/remove-worktree': serialized(removeWorktree),
 };
 
 // 预览服务器会让进程一直活着；宿主关掉 stdin（空闲回收、停用插件）时主动退出。

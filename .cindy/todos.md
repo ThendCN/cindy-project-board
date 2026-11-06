@@ -1,5 +1,7 @@
 # 待办清单
 
+- [x] 发现一个严重问题，如果同时从待办开始多个任务的时候，会产生编码冲突，这里应该使用worktree,或者在批量开始任务的时候让ai分析如何分配任务
+
 ## 侧栏状态条（底座 `sidebarWidget` 原型，分支 `feat/plugin-sidebar-widget`）
 
 - [x] 底座：新增 `sidebarWidget` 能力，宿主在「全部任务」下绘制状态胶囊和任务行

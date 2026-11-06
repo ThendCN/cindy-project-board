@@ -512,3 +512,86 @@ test('候选文件损坏时看板照常显示，下一次提交重新开始', as
   await propose(dir);
   assert.equal((await pending(dir)).length, 1);
 });
+
+// ---------- 从待办开始任务时的独立 worktree ----------
+const { execFileSync } = require('node:child_process');
+const gitIn = (dir, ...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+
+async function repo(files = { 'a.txt': '原文\n' }) {
+  const dir = await project(files);
+  gitIn(dir, 'init', '-q');
+  gitIn(dir, 'add', '.');
+  gitIn(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+  return dir;
+}
+
+test('同时开两个任务：各有独立 worktree 和分支，改同一个文件互不影响，主工作目录不变', async () => {
+  const dir = await repo();
+  const [one, two] = await Promise.all([
+    call('project/create-worktree', { dir }),
+    call('project/create-worktree', { dir }),
+  ]);
+  assert.notEqual(one.path, two.path);
+  assert.notEqual(one.branch, two.branch);
+  assert.equal(gitIn(one.path, 'rev-parse', '--abbrev-ref', 'HEAD'), one.branch);
+  await fs.writeFile(path.join(one.path, 'a.txt'), '任务一\n');
+  await fs.writeFile(path.join(two.path, 'a.txt'), '任务二\n');
+  assert.equal(await read(one.path, 'a.txt'), '任务一\n');
+  assert.equal(await read(two.path, 'a.txt'), '任务二\n');
+  assert.equal(await read(dir, 'a.txt'), '原文\n');
+  assert.equal(gitIn(dir, 'status', '--porcelain'), '');
+});
+
+test('建 worktree 不改 .gitignore，排除规则只写一次，已有文件内容保留', async () => {
+  const dir = await repo();
+  await fs.writeFile(path.join(dir, '.git/info/exclude'), '*.local');
+  await call('project/create-worktree', { dir });
+  await call('project/create-worktree', { dir });
+  assert.equal(await read(dir, '.git/info/exclude'), '*.local\n/.cindy-worktrees/\n');
+  await assert.rejects(read(dir, '.gitignore'));
+});
+
+test('项目目录是仓库子目录时，worktree 建在仓库根下，返回对应的子目录', async () => {
+  const root = await repo({ 'sub/a.txt': '原文\n' });
+  const made = await call('project/create-worktree', { dir: path.join(root, 'sub') });
+  assert.equal(await read(made.path, 'a.txt'), '原文\n');
+  assert.equal(path.basename(made.path), 'sub');
+  assert.equal(path.dirname(path.dirname(made.path)), path.join(await fs.realpath(root), '.cindy-worktrees'));
+});
+
+test('不是 git 仓库或还没有提交时不建 worktree，返回 null', async () => {
+  const plain = await project();
+  assert.equal(await call('project/create-worktree', { dir: plain }), null);
+  const empty = await project();
+  gitIn(empty, 'init', '-q');
+  assert.equal(await call('project/create-worktree', { dir: empty }), null);
+});
+
+test('快照能区分建不了 worktree 的项目：主视图据此提醒可能冲突', async () => {
+  const empty = await project();
+  gitIn(empty, 'init', '-q');
+  assert.deepEqual((await call('project/snapshot', { dir: empty })).git.commits, []);
+  assert.equal((await call('project/snapshot', { dir: await repo() })).git.commits.length, 1);
+});
+
+test('git 建不成 worktree 时把原因报出来', async () => {
+  const dir = await repo();
+  await fs.writeFile(path.join(dir, '.cindy-worktrees'), '占位，不是目录\n');
+  const res = await rpc('project/create-worktree', { dir });
+  assert.ok(res.error?.message);
+});
+
+test('撤销 worktree：干净的连分支一起删；有改动的拒绝，不丢东西；不合法的名字拒绝', async () => {
+  const dir = await repo();
+  const clean = await call('project/create-worktree', { dir });
+  await call('project/remove-worktree', { dir, name: clean.name });
+  await assert.rejects(fs.stat(clean.path));
+  assert.equal(gitIn(dir, 'branch', '--list', clean.branch), '');
+
+  const dirty = await call('project/create-worktree', { dir });
+  await fs.writeFile(path.join(dirty.path, 'a.txt'), '任务已经改了\n');
+  await assert.rejects(call('project/remove-worktree', { dir, name: dirty.name }));
+  assert.equal(await read(dirty.path, 'a.txt'), '任务已经改了\n');
+
+  await assert.rejects(call('project/remove-worktree', { dir, name: '../../a.txt' }), /invalid worktree name/);
+});

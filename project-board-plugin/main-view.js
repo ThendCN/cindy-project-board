@@ -284,6 +284,7 @@ function askForSelected() {
   const first = items[0].text.length > 40 ? `${items[0].text.slice(0, 40)}…` : items[0].text;
   openAsk({
     heading: S.todoTaskHeading,
+    hint: S.todoAskHint,
     title: items.length === 1 ? first : fmt(S.manyTitle, { t: first, n: items.length }),
     text: fmt(S.todosPrompt, { list: items.map((t) => `- ${t.text}`).join('\n') }),
     todos: items.map((t) => t.text),
@@ -348,6 +349,7 @@ function renderTodos() {
       } else if (!t.done) {
         acts.append(todoButton(S.newTask, () => openAsk({
           heading: S.todoTaskHeading,
+          hint: S.todoAskHint,
           title: t.text.length > 60 ? `${t.text.slice(0, 60)}…` : t.text,
           text: fmt(S.todoPrompt, { t: t.text }),
           todos: [t.text],
@@ -742,6 +744,7 @@ function taskItem(task) {
 }
 
 function renderTasks() {
+  renderAskWarn();
   const body = $('task-body');
   body.replaceChildren();
   $('task-count').textContent = '';
@@ -951,6 +954,28 @@ function openAsk(next) {
   $('ask-text').value = next.text;
   $('ask-send').disabled = !next.text.trim();
   $('ask').showModal();
+  renderAskWarn(); // 先按手上的任务列表显示，再重读一次；之后任务状态变化时由 renderTasks 更新
+  loadTasks().catch(() => {});
+}
+
+// 新任务可能和哪些任务共用目录时才提醒。从待办开始的任务在 git 项目里有独立 worktree，既不用提醒，
+// 也不算手写任务的冲突对象。待确认的任务确认后还会接着改文件，也算没结束。读不到任务列表时不提醒。
+function askWarnText() {
+  if (!$('ask').open || !snap || !Array.isArray(taskList)) return '';
+  if (!ask.todos && !ask.manual) return '';
+  // 和 createWorktree 同一判据：不是 git 仓库或还没有提交时建不了 worktree。
+  const canIsolate = snap.git?.commits.length > 0;
+  if (ask.todos && canIsolate) return '';
+  const inWorktree = new Set(canIsolate ? Object.values(linksFor(current.id)) : []);
+  const n = taskList.filter((t) => !t.archived && (t.status === 'running' || t.status === 'awaiting') && !inWorktree.has(t.id)).length;
+  if (!n) return '';
+  return fmt(ask.todos ? S.noWorktreeWarn : canIsolate ? S.manualGitWarn : S.manualNoGitWarn, { n });
+}
+
+function renderAskWarn() {
+  const text = askWarnText();
+  $('ask-warn').textContent = text;
+  $('ask-warn').hidden = !text;
 }
 const openAiAsk = (kind) => openAsk({ heading: S.titles[kind], title: S.titles[kind], text: fmt(S.prompts[kind], { dir: current.id }) });
 
@@ -961,11 +986,14 @@ $('ask').addEventListener('close', async () => {
   const project = current;
   const sending = ask; // 发送期间可能又打开新的提问框，这里固定本次的内容
   const firstLine = text.split('\n')[0];
+  let worktree = null;
   try {
+    // 宿主不能指定新任务的工作目录，只能在提示词里告诉任务去哪做。建不成就报错，不退回共用主工作目录。
+    if (sending.todos) worktree = await call('createWorktree', { dir: project.id });
     const res = await call('askAi', {
       dir: project.id,
       title: sending.title || (firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine),
-      text,
+      text: worktree ? `${text}\n\n${fmt(S.worktreePrompt, { ...worktree, dir: project.id })}` : text,
       requestKey: `ask-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     });
     if (sending.todos && res?.taskId) updateLinks(project.id, (links) => { for (const t of sending.todos) links[t] = res.taskId; });
@@ -973,6 +1001,9 @@ $('ask').addEventListener('close', async () => {
     sending.onSent?.();
     if (view === 'project' && current?.id === project.id) loadTasks();
   } catch (err) {
+    // 任务可能已经建好时（结果不确定）留着 worktree，别把它脚下的目录抽走。
+    if (worktree && err.code !== 'DELIVERY_UNCERTAIN' && err.code !== 'TIMEOUT')
+      call('removeWorktree', { dir: project.id, name: worktree.name }).catch(() => {});
     toast(S.sendErrors[err.code] || fmt(S.failed, { m: err.message }));
   }
 });
@@ -1160,7 +1191,7 @@ async function init() {
   document.querySelector('[data-ai="todos"]').textContent = S.organize;
   document.querySelector('[data-ai="extract"]').textContent = S.extract;
   document.querySelectorAll('[data-ai]').forEach((el) => el.addEventListener('click', () => openAiAsk(el.dataset.ai)));
-  $('task-new').addEventListener('click', () => openAsk({ heading: S.newTask, hint: S.newTaskHint, text: '' }));
+  $('task-new').addEventListener('click', () => openAsk({ heading: S.newTask, hint: S.newTaskHint, text: '', manual: true }));
   $('ask-text').addEventListener('input', () => { $('ask-send').disabled = !$('ask-text').value.trim(); });
   $('todo-new').placeholder = S.todoNew;
   $('todo-add').addEventListener('submit', addTodo);
